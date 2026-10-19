@@ -13,9 +13,9 @@ object VoskModelManager {
     private const val MARCA_LISTO = ".listo"
 
     fun directorioModelo(context: Context): File {
-        // Carpeta visible en la raíz del almacenamiento interno
-        val raizExterna = File(Environment.getExternalStorageDirectory(), "AsistenteVosk")
-        return File(raizExterna, NOMBRE_MODELO)
+        val descargas = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+        val raizAsistente = File(descargas, "AsistenteVosk")
+        return File(raizAsistente, NOMBRE_MODELO)
     }
 
     fun estaInstalado(context: Context): Boolean =
@@ -29,7 +29,7 @@ object VoskModelManager {
         withContext(Dispatchers.IO) {
             onProgreso(100)
             if (!estaInstalado(context)) {
-                throw IOException("Copia la carpeta 'vosk-model-small-es-0.42' dentro de la carpeta 'AsistenteVosk' en el almacenamiento del celu.")
+                throw IOException("Coloca la carpeta en Download/AsistenteVosk/")
             }
         }
 }
