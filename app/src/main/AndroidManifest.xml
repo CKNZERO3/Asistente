@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Internet: para hablar con la API de Gemini (fases posteriores) -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Micrófono: escuchar la palabra de activación y tus comandos -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <!-- Servicio en primer plano. Desde Android 14 hay que declarar también su tipo (micrófono) -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+
+    <!-- Mostrar la notificación persistente (Android 13+ la pide en tiempo de ejecución) -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <application
+        android:allowBackup="false"
+        android:label="Asistente"
+        android:supportsRtl="true"
+        android:theme="@android:style/Theme.Material.Light.NoActionBar">
+
+        <!-- Pantalla principal -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- Servicio que mantiene la app viva en segundo plano, usando el micrófono -->
+        <service
+            android:name=".service.AsistenteService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
+
+    </application>
+
+</manifest>
