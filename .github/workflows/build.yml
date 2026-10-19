@@ -25,9 +25,12 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-
+          
       - name: Preparar Android SDK (acepta licencias)
         uses: android-actions/setup-android@v3
+        with:
+          accept-license: true
+
 
       # Se usa Gradle directamente (sin gradlew) para no necesitar archivos binarios
       # que no se pueden crear desde el celular.
