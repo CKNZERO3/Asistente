@@ -10,6 +10,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
@@ -17,12 +18,14 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Button
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -42,10 +45,17 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.miasistente.app.service.AsistenteService
+import kotlin.math.roundToInt
 
 /**
- * Pantalla principal (Fase 1): un indicador de estado y un botón
- * para activar/desactivar el servicio en primer plano.
+ * Pantalla principal (Fase 2): botón para activar/desactivar el servicio, indicador de
+ * estado del micrófono y barra de volumen en vivo.
+ *
+ * Colores del indicador:
+ *   gris   = servicio detenido
+ *   ámbar  = servicio activo, abriendo el micrófono
+ *   verde  = micrófono capturando audio (silencio o ruido de fondo)
+ *   azul   = voz detectada
  *
  * Más adelante la interfaz se moverá a la carpeta ui/.
  */
@@ -83,10 +93,11 @@ private fun AsistenteTheme(content: @Composable () -> Unit) {
 private fun PantallaPrincipal() {
     val context = LocalContext.current
 
-    // true/false según el estado real del servicio (se actualiza solo)
+    // Estado real del servicio y del audio (se actualizan solos)
     val activo by AsistenteService.isRunning.collectAsStateWithLifecycle()
+    val estado by AsistenteService.estadoAudio.collectAsStateWithLifecycle()
 
-    // Mensaje de error visible (por ejemplo, si se niega el micrófono)
+    // Mensaje de error de permisos (por ejemplo, si se niega el micrófono)
     var mensaje by remember { mutableStateOf<String?>(null) }
 
     // Lanzador del cuadro de permisos del sistema
@@ -106,11 +117,38 @@ private fun PantallaPrincipal() {
         }
     }
 
-    // Verde cuando está activo, gris cuando está detenido (con transición suave)
-    val colorIndicador by animateColorAsState(
-        targetValue = if (activo) Color(0xFF2E7D32) else Color(0xFF9E9E9E),
-        label = "colorIndicador"
+    // --- Qué mostrar según el estado ---------------------------------------------------
+    val colorObjetivo = when {
+        !activo -> Color(0xFF9E9E9E)          // gris
+        estado.hayVoz -> Color(0xFF1565C0)    // azul
+        estado.capturando -> Color(0xFF2E7D32) // verde
+        else -> Color(0xFFF9A825)             // ámbar
+    }
+    val colorIndicador by animateColorAsState(colorObjetivo, label = "colorIndicador")
+
+    val titulo = when {
+        !activo -> "Servicio detenido"
+        estado.hayVoz -> "Voz detectada"
+        estado.capturando -> "Escuchando…"
+        else -> "Abriendo micrófono…"
+    }
+    val subtitulo = when {
+        !activo -> "Pulsa el botón para activarlo"
+        estado.hayVoz -> "Estoy oyendo una voz"
+        estado.capturando -> "Micrófono capturando audio"
+        else -> "Un momento"
+    }
+
+    // Volumen: de -70 dB (muy bajo) a -10 dB (muy alto) convertido a 0..1 para la barra
+    val capturandoDeVerdad = activo && estado.capturando
+    val nivelNormalizado = ((estado.nivelDb + 70f) / 60f).coerceIn(0f, 1f)
+    val nivelAnimado by animateFloatAsState(
+        targetValue = if (capturandoDeVerdad) nivelNormalizado else 0f,
+        label = "nivelVolumen"
     )
+
+    // El error de permisos tiene prioridad; si no hay, se muestra el error de audio
+    val textoError = mensaje ?: estado.error
 
     Surface(
         modifier = Modifier.fillMaxSize(),
@@ -133,17 +171,29 @@ private fun PantallaPrincipal() {
 
             Spacer(Modifier.height(24.dp))
 
+            Text(text = titulo, style = MaterialTheme.typography.titleLarge)
+
+            Spacer(Modifier.height(8.dp))
+
             Text(
-                text = if (activo) "Servicio activo" else "Servicio detenido",
-                style = MaterialTheme.typography.titleLarge
+                text = subtitulo,
+                style = MaterialTheme.typography.bodyMedium,
+                textAlign = TextAlign.Center
+            )
+
+            Spacer(Modifier.height(24.dp))
+
+            // Barra de volumen en vivo
+            LinearProgressIndicator(
+                progress = { nivelAnimado },
+                modifier = Modifier.fillMaxWidth(0.8f)
             )
 
             Spacer(Modifier.height(8.dp))
 
             Text(
-                text = if (activo) "Listo para escuchar" else "Pulsa el botón para activarlo",
-                style = MaterialTheme.typography.bodyMedium,
-                textAlign = TextAlign.Center
+                text = if (capturandoDeVerdad) "Nivel: ${estado.nivelDb.roundToInt()} dB" else "Nivel: —",
+                style = MaterialTheme.typography.bodySmall
             )
 
             Spacer(Modifier.height(32.dp))
@@ -170,7 +220,7 @@ private fun PantallaPrincipal() {
                 Text(if (activo) "Desactivar" else "Activar")
             }
 
-            mensaje?.let {
+            textoError?.let {
                 Spacer(Modifier.height(16.dp))
                 Text(
                     text = it,
