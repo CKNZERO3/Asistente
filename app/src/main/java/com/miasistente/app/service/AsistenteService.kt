@@ -9,25 +9,46 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.IBinder
+import android.os.SystemClock
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import com.miasistente.app.MainActivity
+import com.miasistente.app.audio.AudioRecorder
+import com.miasistente.app.audio.VoiceDetector
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 
 /**
- * Servicio en primer plano que mantiene la app viva con el micrófono disponible.
+ * Estado del audio que la pantalla puede observar.
  *
- * Fase 1: solo arranca, muestra la notificación persistente y reporta su estado.
- * Fase 2 en adelante: aquí dentro se conectará la captura de audio y el wakeword.
+ * @param capturando true cuando el micrófono está entregando audio de verdad
+ * @param hayVoz true mientras el detector considera que alguien habla
+ * @param nivelDb volumen actual en dBFS (-90 = silencio, 0 = máximo)
+ * @param error mensaje de error de audio, o null si todo va bien
+ */
+data class EstadoAudio(
+    val capturando: Boolean = false,
+    val hayVoz: Boolean = false,
+    val nivelDb: Float = -90f,
+    val error: String? = null
+)
+
+/**
+ * Servicio en primer plano que mantiene la app viva y escucha el micrófono.
+ *
+ * Fase 1: arrancar, notificación persistente y estado.
+ * Fase 2: captura continua de audio (AudioRecorder) + detección de voz (VoiceDetector).
+ * Fase 3 en adelante: los frames de audio se enviarán también al detector de palabra clave.
  *
  * Se controla desde fuera con:
  *   AsistenteService.start(context)
  *   AsistenteService.stop(context)
- *   AsistenteService.isRunning   // StateFlow<Boolean> para que la pantalla lo observe
+ *   AsistenteService.isRunning     // StateFlow<Boolean>: servicio activo y micrófono abierto
+ *   AsistenteService.estadoAudio   // StateFlow<EstadoAudio>: nivel, voz detectada, errores
  */
 class AsistenteService : Service() {
 
@@ -39,9 +60,15 @@ class AsistenteService : Service() {
         private const val CHANNEL_ID = "asistente_escucha"
         private const val NOTIFICATION_ID = 1001
 
+        // Cada cuánto se refresca el nivel en pantalla (el audio llega ~31 veces por segundo)
+        private const val INTERVALO_UI_MS = 100L
+
         // Estado compartido: el servicio lo escribe y la pantalla lo lee
         private val _isRunning = MutableStateFlow(false)
         val isRunning: StateFlow<Boolean> = _isRunning.asStateFlow()
+
+        private val _estadoAudio = MutableStateFlow(EstadoAudio())
+        val estadoAudio: StateFlow<EstadoAudio> = _estadoAudio.asStateFlow()
 
         /** Inicia el servicio. Llamar solo con la app abierta y con permiso de micrófono ya concedido. */
         fun start(context: Context) {
@@ -54,6 +81,13 @@ class AsistenteService : Service() {
             context.stopService(Intent(context, AsistenteService::class.java))
         }
     }
+
+    // Componentes de audio (se crean al iniciar la escucha y se liberan al detenerla)
+    private var grabador: AudioRecorder? = null
+    private val detector = VoiceDetector()
+
+    // Solo se toca desde el hilo de audio
+    private var ultimaActualizacionUi = 0L
 
     override fun onCreate() {
         super.onCreate()
@@ -82,25 +116,89 @@ class AsistenteService : Service() {
                 crearNotificacion(),
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
             )
-            _isRunning.value = true
-            Log.d(TAG, "Servicio iniciado")
-            iniciarEscucha()
         } catch (e: Exception) {
             // Ocurre, por ejemplo, si falta el permiso de micrófono o Android lo bloquea
             Log.e(TAG, "No se pudo iniciar en primer plano", e)
             _isRunning.value = false
             stopSelf()
+            return
+        }
+
+        // Solo se marca como "activo" si el micrófono realmente se abrió
+        if (iniciarEscucha()) {
+            _isRunning.value = true
+            Log.d(TAG, "Servicio iniciado")
+        } else {
+            stopSelf()
         }
     }
 
-    /** Punto de enganche para la Fase 2: aquí arrancará la captura de audio. */
-    private fun iniciarEscucha() {
-        // TODO Fase 2: AudioCapture + detección de palabra clave
+    // ---------------------------------------------------------------------------------
+    // Escucha: micrófono + detección de voz
+    // ---------------------------------------------------------------------------------
+
+    /** Abre el micrófono y empieza a procesar audio. @return true si quedó capturando. */
+    private fun iniciarEscucha(): Boolean {
+        if (grabador != null) return true // ya estaba escuchando
+
+        // Limpia el estado y el error de la vez anterior
+        _estadoAudio.value = EstadoAudio()
+        detector.reiniciar()
+        ultimaActualizacionUi = 0L
+
+        val nuevo = AudioRecorder(applicationContext)
+        val ok = nuevo.iniciar(
+            onFrame = { muestras, cantidad -> procesarFrame(muestras, cantidad) },
+            onError = { mensaje -> alFallarElAudio(mensaje) }
+        )
+        if (!ok) return false
+
+        grabador = nuevo
+        return true
     }
 
-    /** Punto de enganche para la Fase 2: aquí se liberará el micrófono. */
+    /** Libera el micrófono. Conserva el último error (si lo hubo) para mostrarlo en pantalla. */
     private fun detenerEscucha() {
-        // TODO Fase 2: detener AudioCapture y liberar recursos
+        grabador?.detener()
+        grabador = null
+        detector.reiniciar()
+        _estadoAudio.update { EstadoAudio(error = it.error) }
+    }
+
+    /**
+     * Se llama por cada frame de audio (≈31 veces por segundo, en el HILO DE AUDIO).
+     * Debe ser rápido: nada de trabajo pesado aquí.
+     *
+     * Fase 3: justo aquí se entregará el frame también al detector de palabra clave.
+     */
+    private fun procesarFrame(muestras: ShortArray, cantidad: Int) {
+        val resultado = detector.procesar(muestras, cantidad)
+
+        val ahora = SystemClock.elapsedRealtime()
+        val actual = _estadoAudio.value
+        val cambioDeVoz = resultado.hayVoz != actual.hayVoz
+
+        // Los cambios de voz se publican al instante; el nivel, cada INTERVALO_UI_MS
+        if (cambioDeVoz || !actual.capturando || ahora - ultimaActualizacionUi >= INTERVALO_UI_MS) {
+            ultimaActualizacionUi = ahora
+            _estadoAudio.update {
+                it.copy(
+                    capturando = true,
+                    hayVoz = resultado.hayVoz,
+                    nivelDb = resultado.nivelDb
+                )
+            }
+            if (cambioDeVoz) {
+                Log.d(TAG, if (resultado.hayVoz) "Voz detectada" else "Fin de voz")
+            }
+        }
+    }
+
+    /** Se llama si el audio falla (puede ser desde el hilo de audio). Apaga el servicio. */
+    private fun alFallarElAudio(mensaje: String) {
+        Log.e(TAG, "Error de audio: $mensaje")
+        _estadoAudio.update { it.copy(capturando = false, hayVoz = false, error = mensaje) }
+        stopSelf()
     }
 
     override fun onDestroy() {
@@ -112,6 +210,10 @@ class AsistenteService : Service() {
 
     // No es un servicio "enlazable": se controla solo con start/stop
     override fun onBind(intent: Intent?): IBinder? = null
+
+    // ---------------------------------------------------------------------------------
+    // Notificación
+    // ---------------------------------------------------------------------------------
 
     private fun crearCanalNotificacion() {
         val canal = NotificationChannel(
@@ -145,7 +247,7 @@ class AsistenteService : Service() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .setContentTitle("Asistente activo")
-            .setContentText("Listo para escuchar")
+            .setContentText("Escuchando el micrófono")
             .setContentIntent(abrirApp)
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Detener", detener)
             .setOngoing(true)
