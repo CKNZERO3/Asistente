@@ -23,15 +23,19 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -44,18 +48,21 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.miasistente.app.data.Ajustes
 import com.miasistente.app.service.AsistenteService
+import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
 
 /**
- * Pantalla principal (Fase 2): botón para activar/desactivar el servicio, indicador de
- * estado del micrófono y barra de volumen en vivo.
+ * Pantalla principal (Fase 3): palabra clave, botón de activar/desactivar, estado del
+ * micrófono, volumen en vivo y aviso cuando se detecta la palabra clave.
  *
  * Colores del indicador:
- *   gris   = servicio detenido
- *   ámbar  = servicio activo, abriendo el micrófono
- *   verde  = micrófono capturando audio (silencio o ruido de fondo)
- *   azul   = voz detectada
+ *   gris    = servicio detenido
+ *   ámbar   = preparando (descargando/cargando el modelo o abriendo el micrófono)
+ *   verde   = esperando la palabra clave
+ *   azul    = se oye una voz
+ *   morado  = ¡palabra clave detectada! (3 segundos)
  *
  * Más adelante la interfaz se moverá a la carpeta ui/.
  */
@@ -92,13 +99,29 @@ private fun AsistenteTheme(content: @Composable () -> Unit) {
 @Composable
 private fun PantallaPrincipal() {
     val context = LocalContext.current
+    val ajustes = remember { Ajustes(context) }
 
     // Estado real del servicio y del audio (se actualizan solos)
     val activo by AsistenteService.isRunning.collectAsStateWithLifecycle()
     val estado by AsistenteService.estadoAudio.collectAsStateWithLifecycle()
 
-    // Mensaje de error de permisos (por ejemplo, si se niega el micrófono)
+    // Mensaje de error local (permisos o palabra clave vacía)
     var mensaje by remember { mutableStateOf<String?>(null) }
+
+    // Lo que el usuario escribe en el campo de palabra clave
+    var palabraEscrita by remember { mutableStateOf(ajustes.palabraClave) }
+
+    // Aviso de "palabra clave detectada": se muestra 3 segundos cada vez que sube el contador
+    var mostrarActivacion by remember { mutableStateOf(false) }
+    LaunchedEffect(estado.activaciones) {
+        if (estado.activaciones > 0) {
+            mostrarActivacion = true
+            delay(3_000)
+            mostrarActivacion = false
+        } else {
+            mostrarActivacion = false
+        }
+    }
 
     // Lanzador del cuadro de permisos del sistema
     val lanzadorPermisos = rememberLauncherForActivityResult(
@@ -118,36 +141,48 @@ private fun PantallaPrincipal() {
     }
 
     // --- Qué mostrar según el estado ---------------------------------------------------
+    val preparando = activo && estado.preparandoModelo
+    val capturandoDeVerdad = activo && estado.capturando
+    val palabra = estado.palabraClave.ifEmpty { ajustes.palabraClave }
+
     val colorObjetivo = when {
-        !activo -> Color(0xFF9E9E9E)          // gris
-        estado.hayVoz -> Color(0xFF1565C0)    // azul
-        estado.capturando -> Color(0xFF2E7D32) // verde
-        else -> Color(0xFFF9A825)             // ámbar
+        !activo -> Color(0xFF9E9E9E)            // gris
+        mostrarActivacion -> Color(0xFF6A1B9A)  // morado
+        preparando -> Color(0xFFF9A825)         // ámbar
+        estado.hayVoz -> Color(0xFF1565C0)      // azul
+        estado.capturando -> Color(0xFF2E7D32)  // verde
+        else -> Color(0xFFF9A825)               // ámbar
     }
     val colorIndicador by animateColorAsState(colorObjetivo, label = "colorIndicador")
 
     val titulo = when {
         !activo -> "Servicio detenido"
+        mostrarActivacion -> "¡Te escuché!"
+        preparando && estado.progresoModelo >= 0 -> "Descargando modelo de voz…"
+        preparando -> "Cargando modelo de voz…"
         estado.hayVoz -> "Voz detectada"
-        estado.capturando -> "Escuchando…"
+        estado.capturando -> "Esperando «$palabra»"
         else -> "Abriendo micrófono…"
     }
     val subtitulo = when {
-        !activo -> "Pulsa el botón para activarlo"
+        !activo -> "Elige tu palabra clave y pulsa Activar"
+        mostrarActivacion -> "Palabra clave detectada"
+        preparando && estado.progresoModelo >= 0 ->
+            "Solo la primera vez (≈ 39 MB). Mantén la app abierta. ${estado.progresoModelo} %"
+        preparando -> "Un momento…"
         estado.hayVoz -> "Estoy oyendo una voz"
-        estado.capturando -> "Micrófono capturando audio"
+        estado.capturando -> "Di «$palabra» para activarme"
         else -> "Un momento"
     }
 
     // Volumen: de -70 dB (muy bajo) a -10 dB (muy alto) convertido a 0..1 para la barra
-    val capturandoDeVerdad = activo && estado.capturando
     val nivelNormalizado = ((estado.nivelDb + 70f) / 60f).coerceIn(0f, 1f)
     val nivelAnimado by animateFloatAsState(
         targetValue = if (capturandoDeVerdad) nivelNormalizado else 0f,
         label = "nivelVolumen"
     )
 
-    // El error de permisos tiene prioridad; si no hay, se muestra el error de audio
+    // El error local tiene prioridad; si no hay, se muestra el error del servicio
     val textoError = mensaje ?: estado.error
 
     Surface(
@@ -158,6 +193,7 @@ private fun PantallaPrincipal() {
             modifier = Modifier
                 .fillMaxSize()
                 .safeDrawingPadding()
+                .verticalScroll(rememberScrollState())
                 .padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
@@ -171,7 +207,11 @@ private fun PantallaPrincipal() {
 
             Spacer(Modifier.height(24.dp))
 
-            Text(text = titulo, style = MaterialTheme.typography.titleLarge)
+            Text(
+                text = titulo,
+                style = MaterialTheme.typography.titleLarge,
+                textAlign = TextAlign.Center
+            )
 
             Spacer(Modifier.height(8.dp))
 
@@ -183,36 +223,84 @@ private fun PantallaPrincipal() {
 
             Spacer(Modifier.height(24.dp))
 
-            // Barra de volumen en vivo
-            LinearProgressIndicator(
-                progress = { nivelAnimado },
-                modifier = Modifier.fillMaxWidth(0.8f)
-            )
+            // Una sola barra: progreso de descarga mientras se prepara; volumen después
+            if (preparando) {
+                if (estado.progresoModelo >= 0) {
+                    LinearProgressIndicator(
+                        progress = { estado.progresoModelo / 100f },
+                        modifier = Modifier.fillMaxWidth(0.8f)
+                    )
+                } else {
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth(0.8f))
+                }
+            } else {
+                LinearProgressIndicator(
+                    progress = { nivelAnimado },
+                    modifier = Modifier.fillMaxWidth(0.8f)
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = if (capturandoDeVerdad) "Nivel: ${estado.nivelDb.roundToInt()} dB" else "Nivel: —",
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
 
-            Spacer(Modifier.height(8.dp))
-
-            Text(
-                text = if (capturandoDeVerdad) "Nivel: ${estado.nivelDb.roundToInt()} dB" else "Nivel: —",
-                style = MaterialTheme.typography.bodySmall
-            )
+            // Datos de depuración: ayudan a afinar la palabra clave sin necesitar PC
+            if (capturandoDeVerdad) {
+                Spacer(Modifier.height(16.dp))
+                Text(
+                    text = "Último reconocido: " +
+                        if (estado.ultimoTexto.isEmpty()) "—" else "«${estado.ultimoTexto}»",
+                    style = MaterialTheme.typography.bodySmall,
+                    textAlign = TextAlign.Center
+                )
+                Text(
+                    text = "Activaciones: ${estado.activaciones}",
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
 
             Spacer(Modifier.height(32.dp))
+
+            // La palabra clave solo se edita con el servicio detenido
+            if (!activo) {
+                OutlinedTextField(
+                    value = palabraEscrita,
+                    onValueChange = { palabraEscrita = it.take(30) },
+                    label = { Text("Palabra clave") },
+                    singleLine = true,
+                    supportingText = {
+                        Text("Una palabra común del español, de 3 o más sílabas. Los nombres raros pueden no reconocerse.")
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(16.dp))
+            }
 
             Button(
                 onClick = {
                     if (activo) {
                         AsistenteService.stop(context)
                     } else {
-                        // Pedir solo los permisos que aún no están concedidos
-                        val faltantes = permisosNecesarios().filter {
-                            ContextCompat.checkSelfPermission(context, it) !=
-                                PackageManager.PERMISSION_GRANTED
-                        }
-                        if (faltantes.isEmpty()) {
-                            mensaje = null
-                            AsistenteService.start(context)
+                        val normalizada = Ajustes.normalizar(palabraEscrita)
+                        if (normalizada.isEmpty()) {
+                            mensaje = "Escribe una palabra clave (solo letras)."
                         } else {
-                            lanzadorPermisos.launch(faltantes.toTypedArray())
+                            // Guardar la palabra elegida antes de arrancar
+                            ajustes.palabraClave = normalizada
+                            palabraEscrita = normalizada
+
+                            // Pedir solo los permisos que aún no están concedidos
+                            val faltantes = permisosNecesarios().filter {
+                                ContextCompat.checkSelfPermission(context, it) !=
+                                    PackageManager.PERMISSION_GRANTED
+                            }
+                            if (faltantes.isEmpty()) {
+                                mensaje = null
+                                AsistenteService.start(context)
+                            } else {
+                                lanzadorPermisos.launch(faltantes.toTypedArray())
+                            }
                         }
                     }
                 }
