@@ -16,8 +16,14 @@ android {
         applicationId = "com.miasistente.app"
         minSdk = 26          // Android 8.0 en adelante
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 3
+        versionName = "0.3.0"
+
+        // Vosk trae librerías nativas pesadas por cada tipo de procesador.
+        // Se incluyen solo las de teléfonos reales (no las de emuladores x86) para que el APK pese menos.
+        ndk {
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+        }
     }
 
     buildTypes {
@@ -51,6 +57,11 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.9.3")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
+
+    // Reconocimiento de voz offline (Fase 3: detector de palabra clave).
+    // Vosk necesita JNA como .aar (con "@aar") para incluir sus librerías nativas.
+    implementation("com.alphacephei:vosk-android:0.3.47")
+    implementation("net.java.dev.jna:jna:5.13.0@aar")
 
     // Almacenamiento cifrado de la API Key de Gemini.
     // OJO: Google marcó esta librería como obsoleta en versiones posteriores (alpha07).
