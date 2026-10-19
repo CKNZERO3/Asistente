@@ -1,6 +1,3 @@
-# Compila la app en la nube de GitHub y deja el APK listo para descargar.
-# Se ejecuta en cada push a "main" y también a mano desde la pestaña Actions.
-
 name: Build APK
 
 on:
@@ -25,19 +22,14 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-          
-      - name: Preparar Android SDK (acepta licencias)
-        uses: android-actions/setup-android@v3
-        with:
-          accept-license: true
 
-
-      # Se usa Gradle directamente (sin gradlew) para no necesitar archivos binarios
-      # que no se pueden crear desde el celular.
       - name: Preparar Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.10.2"
+
+      - name: Aceptar licencias del SDK
+        run: yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
 
       - name: Compilar APK debug
         run: gradle assembleDebug --stacktrace
