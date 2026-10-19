@@ -91,7 +91,7 @@ class AudioRecorder(context: Context) {
             onError("Este teléfono no soporta la captura de audio a 16 kHz.")
             return false
         }
-        val bufferBytes = maxOf(bufferMinimo, FRAME_SIZE * 2 * 4) // 2 bytes por muestra
+        val bufferBytes = maxOf(bufferMinimo, FRAME_SIZE * 2 * 16) // 2 bytes por muestra
 
         // 3) Crear el AudioRecord
         val record = try {
