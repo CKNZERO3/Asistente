@@ -1,0 +1,15 @@
+# Archivos generados: no se suben a GitHub
+.gradle/
+build/
+local.properties
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Archivos de IDE
+.idea/
+*.iml
+
+# Firmas y claves: NUNCA subir
+*.jks
+*.keystore
