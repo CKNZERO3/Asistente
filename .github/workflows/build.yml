@@ -1,0 +1,47 @@
+# Compila la app en la nube de GitHub y deja el APK listo para descargar.
+# Se ejecuta en cada push a "main" y también a mano desde la pestaña Actions.
+
+name: Build APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Descargar el código
+        uses: actions/checkout@v4
+
+      - name: Instalar Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Preparar Android SDK (acepta licencias)
+        uses: android-actions/setup-android@v3
+
+      # Se usa Gradle directamente (sin gradlew) para no necesitar archivos binarios
+      # que no se pueden crear desde el celular.
+      - name: Preparar Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.10.2"
+
+      - name: Compilar APK debug
+        run: gradle assembleDebug --stacktrace
+
+      - name: Guardar APK como descarga
+        uses: actions/upload-artifact@v4
+        with:
+          name: asistente-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
