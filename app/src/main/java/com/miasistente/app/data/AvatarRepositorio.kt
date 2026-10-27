@@ -1,0 +1,88 @@
+package com.miasistente.app.data
+
+import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.net.Uri
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.io.File
+
+/**
+ * Guarda la imagen de avatar que el usuario elige de la galería.
+ *
+ * Por qué se copia: el permiso que da la galería sobre la imagen es temporal. Si solo
+ * guardáramos su dirección (Uri), dejaría de funcionar. Se copia a la carpeta privada de
+ * la app, reducida a un máximo de 768 px para no gastar memoria.
+ *
+ * La futura ventana flotante leerá el mismo archivo con [cargar].
+ */
+object AvatarRepositorio {
+
+    private const val NOMBRE_ARCHIVO = "avatar_personalizado.png"
+    private const val LADO_MAXIMO = 768
+
+    fun archivo(context: Context): File =
+        File(context.applicationContext.filesDir, NOMBRE_ARCHIVO)
+
+    /** Copia la imagen elegida. @return true si se guardó bien. */
+    suspend fun guardarDesdeUri(context: Context, uri: Uri): Boolean =
+        withContext(Dispatchers.IO) {
+            try {
+                val resolver = context.applicationContext.contentResolver
+
+                // 1) Medir sin cargar la imagen completa
+                val medidas = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, medidas) }
+                    ?: return@withContext false
+                if (medidas.outWidth <= 0 || medidas.outHeight <= 0) return@withContext false
+
+                // 2) Cargar ya reducida (potencias de 2) para no agotar la memoria con fotos enormes
+                var muestreo = 1
+                while (medidas.outWidth / muestreo > LADO_MAXIMO * 2 ||
+                    medidas.outHeight / muestreo > LADO_MAXIMO * 2
+                ) {
+                    muestreo *= 2
+                }
+                val opciones = BitmapFactory.Options().apply { inSampleSize = muestreo }
+                val original = resolver.openInputStream(uri)?.use {
+                    BitmapFactory.decodeStream(it, null, opciones)
+                } ?: return@withContext false
+
+                // 3) Ajuste fino al tamaño máximo
+                val escala = minOf(1f, LADO_MAXIMO.toFloat() / maxOf(original.width, original.height))
+                val final = if (escala < 1f) {
+                    Bitmap.createScaledBitmap(
+                        original,
+                        (original.width * escala).toInt().coerceAtLeast(1),
+                        (original.height * escala).toInt().coerceAtLeast(1),
+                        true
+                    )
+                } else {
+                    original
+                }
+
+                archivo(context).outputStream().use { final.compress(Bitmap.CompressFormat.PNG, 100, it) }
+                true
+            } catch (e: Exception) {
+                false
+            }
+        }
+
+    /** Lee el avatar guardado, o null si no hay ninguno. */
+    suspend fun cargar(context: Context): ImageBitmap? =
+        withContext(Dispatchers.IO) {
+            val f = archivo(context)
+            if (!f.exists()) {
+                null
+            } else {
+                try {
+                    BitmapFactory.decodeFile(f.absolutePath)?.asImageBitmap()
+                } catch (e: Exception) {
+                    null
+                }
+            }
+        }
+}
