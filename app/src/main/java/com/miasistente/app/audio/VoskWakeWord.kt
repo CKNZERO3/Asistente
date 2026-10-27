@@ -173,6 +173,22 @@ class VoskWakeWord(
         return aceptada
     }
 
+     /** Crea un transcriptor que comparte este modelo (se debe cerrar antes que este motor). */
+    @Synchronized
+    fun crearTranscriptor(): TranscriptorVoz {
+        check(!cerrado) { "El motor ya está cerrado." }
+        return TranscriptorVoz(model)
+    }
+
+    @Synchronized
+    override fun reiniciar() {
+        if (cerrado) return
+        recognizer.reset()
+        vozActiva = false
+        prerollUsados = 0
+        prerollSiguiente = 0
+    } 
+    
     @Synchronized
     override fun close() {
         if (cerrado) return
