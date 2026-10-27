@@ -1,4 +1,5 @@
-// AssistantAvatarView.kt
+package com.miasistente.app.ui.avatar
+
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -21,11 +22,11 @@ fun AssistantAvatarView(
 ) {
     val transition = updateTransition(targetState = currentState, label = "AssistantStateTransition")
 
-    // Dynamic animations mapped to states
+    // Explicit AnimationSpec<Float> typing prevents Kotlin inference mismatch between InfiniteRepeatableSpec and SpringSpec
     val pulseScale by transition.animateFloat(
         label = "PulseScale",
         transitionSpec = {
-            when (targetState) {
+            val spec: AnimationSpec<Float> = when (targetState) {
                 AssistantState.LISTENING -> infiniteRepeatable(
                     animation = tween(600, easing = FastOutSlowInEasing),
                     repeatMode = RepeatMode.Reverse
@@ -38,8 +39,9 @@ fun AssistantAvatarView(
                     animation = tween(200, easing = FastOutSlowInEasing),
                     repeatMode = RepeatMode.Reverse
                 )
-                else -> spring(stiffness = Spring.StiffnessLow)
+                AssistantState.IDLE -> spring(stiffness = Spring.StiffnessLow)
             }
+            spec
         }
     ) { state ->
         when (state) {
@@ -53,11 +55,12 @@ fun AssistantAvatarView(
     val rotationAngle by transition.animateFloat(
         label = "RotationAngle",
         transitionSpec = {
-            if (targetState == AssistantState.THINKING) {
+            val spec: AnimationSpec<Float> = if (targetState == AssistantState.THINKING) {
                 infiniteRepeatable(animation = tween(1200, easing = LinearEasing))
             } else {
                 spring()
             }
+            spec
         }
     ) { state ->
         if (state == AssistantState.THINKING) 360f else 0f
