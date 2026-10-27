@@ -12,6 +12,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -44,8 +45,8 @@ fun AssistantControlCard(
         }
     }.toTypedArray()
 
-    // Permission launcher for runtime checks
-    const val permissionLauncher = rememberLauncherForActivityResult(
+    // Permission launcher for runtime checks (removed invalid local 'const' modifier)
+    val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
         val allGranted = permissions.values.all { it }
@@ -124,7 +125,7 @@ fun AssistantControlCard(
                 )
             }
 
-            // 3. Clean button trigger mechanism to start/stop the voice session
+            // 3. Clean button trigger mechanism with exhaustive if/else expression
             Button(
                 onClick = { triggerVoiceSessionToggle() },
                 colors = ButtonDefaults.buttonColors(
@@ -134,7 +135,7 @@ fun AssistantControlCard(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(
-                    text = if (isRunning) "Detener Asistente" : "Iniciar Sesión de Voz",
+                    text = if (isRunning) "Detener Asistente" else "Iniciar Sesión de Voz",
                     fontWeight = FontWeight.Bold
                 )
             }
