@@ -13,6 +13,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.dp
+import com.miasistente.app.dominio.AssistantState
 
 @Composable
 fun AssistantAvatarView(
@@ -20,51 +21,59 @@ fun AssistantAvatarView(
     modifier: Modifier = Modifier,
     baseColor: Color = Color(0xFF3F51B5)
 ) {
-    val transition = updateTransition(targetState = currentState, label = "AssistantStateTransition")
+    // Usamos InfiniteTransition para animaciones continuas en bucle de forma nativa
+    val infiniteTransition = rememberInfiniteTransition(label = "AssistantInfiniteTransition")
 
-    // Explicit AnimationSpec<Float> typing prevents Kotlin inference mismatch between InfiniteRepeatableSpec and SpringSpec
-    val pulseScale by transition.animateFloat(
-        label = "PulseScale",
-        transitionSpec = {
-            val spec: AnimationSpec<Float> = when (targetState) {
-                AssistantState.LISTENING -> infiniteRepeatable(
-                    animation = tween(600, easing = FastOutSlowInEasing),
-                    repeatMode = RepeatMode.Reverse
-                )
-                AssistantState.THINKING -> infiniteRepeatable(
-                    animation = tween(400, easing = LinearEasing),
-                    repeatMode = RepeatMode.Restart
-                )
-                AssistantState.SPEAKING -> infiniteRepeatable(
-                    animation = tween(200, easing = FastOutSlowInEasing),
-                    repeatMode = RepeatMode.Reverse
-                )
-                AssistantState.IDLE -> spring(stiffness = Spring.StiffnessLow)
-            }
-            spec
-        }
-    ) { state ->
-        when (state) {
-            AssistantState.IDLE -> 1.0f
-            AssistantState.LISTENING -> 1.2f
-            AssistantState.THINKING -> 1.1f
-            AssistantState.SPEAKING -> 1.3f
-        }
+    // Declaraciones incondicionales (respetan el slot table de Compose)
+    val listeningScale by infiniteTransition.animateFloat(
+        initialValue = 1.0f,
+        targetValue = 1.2f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(600, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "ListeningScale"
+    )
+
+    val thinkingScale by infiniteTransition.animateFloat(
+        initialValue = 1.0f,
+        targetValue = 1.1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(400, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "ThinkingScale"
+    )
+
+    val speakingScale by infiniteTransition.animateFloat(
+        initialValue = 1.0f,
+        targetValue = 1.3f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(200, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "SpeakingScale"
+    )
+
+    val rotationAngle by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1200, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "ThinkingRotation"
+    )
+
+    // Selección reactiva del factor de escala según el estado del asistente
+    val pulseScale = when (currentState) {
+        AssistantState.IDLE -> 1.0f
+        AssistantState.LISTENING -> listeningScale
+        AssistantState.THINKING -> thinkingScale
+        AssistantState.SPEAKING -> speakingScale
     }
 
-    val rotationAngle by transition.animateFloat(
-        label = "RotationAngle",
-        transitionSpec = {
-            val spec: AnimationSpec<Float> = if (targetState == AssistantState.THINKING) {
-                infiniteRepeatable(animation = tween(1200, easing = LinearEasing))
-            } else {
-                spring()
-            }
-            spec
-        }
-    ) { state ->
-        if (state == AssistantState.THINKING) 360f else 0f
-    }
+    val activeRotation = if (currentState == AssistantState.THINKING) rotationAngle else 0f
 
     Box(
         modifier = modifier
@@ -76,14 +85,14 @@ fun AssistantAvatarView(
         Canvas(modifier = Modifier.size(80.dp)) {
             val radius = (size.minDimension / 2) * (pulseScale * 0.8f)
             
-            // Outer reactive ring
+            // Anillo reactivo exterior
             drawCircle(
                 color = baseColor.copy(alpha = 0.5f),
                 radius = radius,
                 style = Stroke(width = 4.dp.toPx())
             )
             
-            // Core inner circle
+            // Círculo central
             drawCircle(
                 color = baseColor,
                 radius = size.minDimension / 3
