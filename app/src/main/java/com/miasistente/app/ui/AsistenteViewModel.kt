@@ -1,33 +1,29 @@
 package com.miasistente.app.ui
 
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
 import com.miasistente.app.dominio.AssistantState
-import kotlinx.coroutines.flow.MutableStateFlow
+import com.miasistente.app.service.AsistenteService
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.stateIn
 
 /**
  * ViewModel managing the runtime state of the hybrid voice assistant.
- * Exposes a reactive StateFlow backed by AssistantState.
+ * Exposes a reactive StateFlow backed by AssistantState synchronized with AsistenteService.
  */
 class AsistenteViewModel : ViewModel() {
 
-    private val _assistantState = MutableStateFlow(AssistantState.IDLE)
-    val assistantState: StateFlow<AssistantState> = _assistantState.asStateFlow()
+    val assistantState: StateFlow<AssistantState> = AsistenteService.assistantState
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = AssistantState.IDLE
+        )
 
     fun setIdle() {
-        _assistantState.value = AssistantState.IDLE
-    }
-
-    fun setListening() {
-        _assistantState.value = AssistantState.LISTENING
-    }
-
-    fun setThinking() {
-        _assistantState.value = AssistantState.THINKING
-    }
-
-    fun setSpeaking() {
-        _assistantState.value = AssistantState.SPEAKING
+        AsistenteService.assistantState.value.let { 
+            // Optional direct manual control hook if needed
+        }
     }
 }
