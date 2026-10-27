@@ -208,7 +208,6 @@ fun PantallaPrincipal() {
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-
             // 1) Encabezado con interruptor y Avatar Animado vinculado al estado del servicio
             Tarjeta(titulo = "Asistente IA", emoji = "🎙️") {
 
