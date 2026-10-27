@@ -59,23 +59,13 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 
-/** Permisos que hacen falta para arrancar el servicio de voz. */
 private fun permisosParaServicio(): List<String> = buildList {
     add(Manifest.permission.RECORD_AUDIO)
-    // Android 13+ exige permiso explícito para mostrar notificaciones
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         add(Manifest.permission.POST_NOTIFICATIONS)
     }
 }
 
-/**
- * Pantalla de ajustes del asistente. Orden de las secciones:
- *   1. Encabezado "Asistente IA" con interruptor de encendido
- *   2. Permisos (micrófono, superposición)
- *   3. Palabra clave
- *   4. Avatar
- *   5. Capacidades (offline / online)
- */
 @Composable
 fun PantallaPrincipal() {
     val context = LocalContext.current
@@ -84,18 +74,18 @@ fun PantallaPrincipal() {
     val almacen = remember { SecureStorage(context) }
     val procesador = remember { ProcesadorComandos(context) }
 
-    // --- Estado del servicio de voz (viene de AsistenteService, sin cambios) -------------
     val activo by AsistenteService.isRunning.collectAsStateWithLifecycle()
     val estado by AsistenteService.estadoAudio.collectAsStateWithLifecycle()
 
-    // --- Permisos -------------------------------------------------------------------------
+    // Collect real-time lifecycle states directly from AsistenteService background bridge
+    val currentAvatarState by AsistenteService.assistantState.collectAsStateWithLifecycle()
+
     var microfonoOk by remember { mutableStateOf(Permisos.microfono(context)) }
     var superposicionOk by remember { mutableStateOf(Permisos.superposicion(context)) }
     var microfonoDenegado by remember { mutableStateOf(false) }
     var iniciarTrasPermisos by remember { mutableStateOf(false) }
     var mensaje by remember { mutableStateOf<String?>(null) }
 
-    // Al volver de Ajustes (superposición) hay que volver a comprobar
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         microfonoOk = Permisos.microfono(context)
         superposicionOk = Permisos.superposicion(context)
@@ -117,7 +107,6 @@ fun PantallaPrincipal() {
         }
     }
 
-    // --- Palabra clave ---------------------------------------------------------------------
     var palabraEscrita by remember { mutableStateOf(ajustes.palabraClave) }
 
     fun activarServicio() {
@@ -141,7 +130,6 @@ fun PantallaPrincipal() {
         }
     }
 
-    // --- Avatar ----------------------------------------------------------------------------
     var avatar by remember { mutableStateOf(ajustes.avatar) }
     var imagenPersonalizada by remember { mutableStateOf<ImageBitmap?>(null) }
     var mensajeAvatar by remember { mutableStateOf<String?>(null) }
@@ -165,15 +153,12 @@ fun PantallaPrincipal() {
         }
     }
 
-    // --- Gemini y comandos -------------------------------------------------------------------
     var tieneClave by remember { mutableStateOf(false) }
     var probando by remember { mutableStateOf(false) }
     var resultado by remember { mutableStateOf<ResultadoComando?>(null) }
 
-    // Leer el almacén cifrado puede tardar un poco: fuera del hilo principal
     LaunchedEffect(Unit) { tieneClave = withContext(Dispatchers.IO) { almacen.tieneApiKey() } }
 
-    // --- Aviso de "palabra clave detectada" (3 segundos) -----------------------------------
     var mostrarActivacion by remember { mutableStateOf(false) }
     LaunchedEffect(estado.activaciones) {
         if (estado.activaciones > 0) {
@@ -185,19 +170,9 @@ fun PantallaPrincipal() {
         }
     }
 
-    // --- Textos y colores de estado --------------------------------------------------------
     val preparando = activo && estado.preparandoModelo
     val capturando = activo && estado.capturando
     val palabra = estado.palabraClave.ifEmpty { ajustes.palabraClave }
-
-    // --- Estado dinámico del avatar --------------------------------------------------------
-    val currentAvatarState = when {
-        !activo -> AssistantState.IDLE
-        mostrarActivacion -> AssistantState.SPEAKING
-        estado.hayVoz -> AssistantState.LISTENING
-        preparando -> AssistantState.THINKING
-        else -> AssistantState.IDLE
-    }
 
     val textoEstado = when {
         !activo -> "Detenido"
@@ -218,9 +193,6 @@ fun PantallaPrincipal() {
     }
     val textoError = mensaje ?: estado.error
 
-    // ==========================================================================================
-    // Interfaz
-    // ==========================================================================================
     Box(
         Modifier
             .fillMaxSize()
@@ -237,10 +209,9 @@ fun PantallaPrincipal() {
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
 
-            // 1) Encabezado con interruptor
+            // 1) Encabezado con interruptor y Avatar Animado vinculado al estado del servicio
             Tarjeta(titulo = "Asistente IA", emoji = "🎙️") {
 
-                // Avatar animado integrado en el encabezado
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
