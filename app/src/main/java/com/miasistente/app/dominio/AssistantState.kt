@@ -1,3 +1,4 @@
+package com.miasistente.app.dominio
 
 enum class AssistantState {
     IDLE,
@@ -6,7 +7,6 @@ enum class AssistantState {
     SPEAKING
 }
 
-// PersonalityProfile.kt
 sealed interface PersonalityProfile {
     val id: String
     val name: String
