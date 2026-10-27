@@ -1,8 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- Internet: para hablar con la API de Gemini (fases posteriores) -->
+    <!-- Internet: para hablar con la API de Gemini y descargar el modelo de voz -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Saber si hay conexión antes de llamar a Gemini -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
     <!-- Micrófono: escuchar la palabra de activación y tus comandos -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
@@ -14,14 +16,19 @@
     <!-- Mostrar la notificación persistente (Android 13+ la pide en tiempo de ejecución) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
-    <uses-permission android:name="android.permission.INTERNET" />
-    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-    
+    <!-- Superposición sobre otras apps: la necesitará el avatar flotante (el usuario la concede en Ajustes) -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+
+    <!-- Android 11+: para poder ver si Musicolet está instalado -->
+    <queries>
+        <package android:name="in.krosbits.musicolet" />
+    </queries>
+
     <application
         android:allowBackup="false"
         android:label="Asistente"
         android:supportsRtl="true"
-        android:theme="@android:style/Theme.Material.Light.NoActionBar">
+        android:theme="@android:style/Theme.Material.NoActionBar">
 
         <!-- Pantalla principal -->
         <activity
