@@ -287,7 +287,7 @@ fun PantallaPrincipal() {
                 }
             }
 
-                        // 1) Encabezado con interruptor
+           
            if (activo && (estado.comando.isNotEmpty() || estado.respuesta.isNotEmpty())) {
     Tarjeta(titulo = "Última interacción", emoji = "💬") {
         if (estado.comando.isNotEmpty()) {
