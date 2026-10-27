@@ -21,10 +21,7 @@
 
     <!-- Android 11+: para poder ver si Musicolet está instalado -->
     <queries>
-        <package android:name="in.krosbits.musicolet" /> 
-        <intent>
-    <action android:name="android.intent.action.TTS_SERVICE" />
-</intent>
+        <package android:name="in.krosbits.musicolet" />
     </queries>
 
     <application
