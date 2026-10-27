@@ -50,7 +50,9 @@ import com.miasistente.app.data.Ajustes
 import com.miasistente.app.data.AvatarRepositorio
 import com.miasistente.app.data.Permisos
 import com.miasistente.app.data.SecureStorage
+import com.miasistente.app.dominio.AssistantState
 import com.miasistente.app.service.AsistenteService
+import com.miasistente.app.ui.avatar.AssistantAvatarView
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -188,6 +190,15 @@ fun PantallaPrincipal() {
     val capturando = activo && estado.capturando
     val palabra = estado.palabraClave.ifEmpty { ajustes.palabraClave }
 
+    // --- Estado dinámico del avatar --------------------------------------------------------
+    val currentAvatarState = when {
+        !activo -> AssistantState.IDLE
+        mostrarActivacion -> AssistantState.SPEAKING
+        estado.hayVoz -> AssistantState.LISTENING
+        preparando -> AssistantState.THINKING
+        else -> AssistantState.IDLE
+    }
+
     val textoEstado = when {
         !activo -> "Detenido"
         mostrarActivacion -> "¡Te escuché!"
@@ -228,6 +239,17 @@ fun PantallaPrincipal() {
 
             // 1) Encabezado con interruptor
             Tarjeta(titulo = "Asistente IA", emoji = "🎙️") {
+
+                // Avatar animado integrado en el encabezado
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 12.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    AssistantAvatarView(currentState = currentAvatarState)
+                }
+
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(
                         Modifier
