@@ -287,21 +287,6 @@ fun PantallaPrincipal() {
                 }
             }
 
-           
-           if (activo && (estado.comando.isNotEmpty() || estado.respuesta.isNotEmpty())) {
-    Tarjeta(titulo = "Última interacción", emoji = "💬") {
-        if (estado.comando.isNotEmpty()) {
-            Text("Dijiste: «${estado.comando}»", color = Paleta.TextoSuave)
-        }
-        if (estado.respuesta.isNotEmpty()) {
-            Spacer(Modifier.height(8.dp))
-            Text(
-                (if (estado.respuestaOk) "✔ " else "✖ ") + estado.respuesta,
-                color = if (estado.respuestaOk) Paleta.Verde else Paleta.Rojo
-            )
-                    }
-                }
-            }
             // 2) Permisos
             SeccionPermisos(
                 microfonoOk = microfonoOk,
