@@ -21,10 +21,8 @@ fun AssistantAvatarView(
     modifier: Modifier = Modifier,
     baseColor: Color = Color(0xFF3F51B5)
 ) {
-    // Usamos InfiniteTransition para animaciones continuas en bucle de forma nativa
     val infiniteTransition = rememberInfiniteTransition(label = "AssistantInfiniteTransition")
 
-    // Declaraciones incondicionales (respetan el slot table de Compose)
     val listeningScale by infiniteTransition.animateFloat(
         initialValue = 1.0f,
         targetValue = 1.2f,
@@ -65,15 +63,13 @@ fun AssistantAvatarView(
         label = "ThinkingRotation"
     )
 
-    // Selección reactiva del factor de escala según el estado del asistente
     val pulseScale = when (currentState) {
         AssistantState.IDLE -> 1.0f
         AssistantState.LISTENING -> listeningScale
         AssistantState.THINKING -> thinkingScale
         AssistantState.SPEAKING -> speakingScale
+        else -> 1.0f // Bloque else explícito para garantizar exhaustividad
     }
-
-    val activeRotation = if (currentState == AssistantState.THINKING) rotationAngle else 0f
 
     Box(
         modifier = modifier
