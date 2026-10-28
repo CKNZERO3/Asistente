@@ -20,6 +20,11 @@ android {
         ndk {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a")
         }
+        testOptions {
+        unitTests.all {
+        it.useJUnitPlatform()
+            }
+        }
     }
 
     buildTypes {
