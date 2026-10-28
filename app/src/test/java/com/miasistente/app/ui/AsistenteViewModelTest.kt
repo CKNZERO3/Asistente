@@ -79,25 +79,34 @@ class AsistenteViewModelTest {
             .isEqualTo(AssistantState.LISTENING)
     }
 
+    
     @Test
     fun setIdleResetsActiveStates() = runTest(testDispatcher) {
+        viewModel.assistantState.test {
+            // StateFlow immediately emits its current value.
+            assertThat(awaitItem()).isEqualTo(AssistantState.IDLE)
+
         val activeStates = listOf(
             AssistantState.LISTENING,
             AssistantState.THINKING,
             AssistantState.SPEAKING
         )
 
-        activeStates.forEach { state ->
-            viewModel.setState(state)
+        activeStates.forEach { activeState ->
+            // Enter an active state and verify its emission.
+            viewModel.setState(activeState)
             runCurrent()
+            assertThat(awaitItem()).isEqualTo(activeState)
 
-            assertThat(viewModel.assistantState.value).isEqualTo(state)
-
+            // Return to IDLE and verify the next emission.
             viewModel.setIdle()
             runCurrent()
+            assertThat(awaitItem()).isEqualTo(AssistantState.IDLE)
+        }
 
-            assertThat(viewModel.assistantState.value)
-                .isEqualTo(AssistantState.IDLE)
+            // No unexpected or duplicate emissions should remain.
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
         }
     }
 
