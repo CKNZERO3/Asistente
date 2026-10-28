@@ -1,18 +1,16 @@
 
 package com.miasistente.app.ui
 
-import androidx.lifecycle.ViewModelStore
 import com.google.common.truth.Truth.assertThat
 import com.miasistente.app.dominio.AssistantState
+import app.cash.turbine.test
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
-import app.cash.turbine.test
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -27,7 +25,9 @@ class AsistenteViewModelTest {
     @BeforeEach
     fun setUp() {
         kotlinx.coroutines.Dispatchers.setMain(testDispatcher)
+
         stateSource = MutableStateFlow(AssistantState.IDLE)
+
         viewModel = AsistenteViewModel(
             stateSource = stateSource,
             updateState = { stateSource.value = it }
@@ -72,39 +72,44 @@ class AsistenteViewModelTest {
 
     @Test
     fun externalSourceUpdatesAreObserved() = runTest(testDispatcher) {
-        stateSource.value = AssistantState.LISTENING
-        runCurrent()
+        viewModel.assistantState.test {
+            // Receive the initial StateFlow value.
+            assertThat(awaitItem()).isEqualTo(AssistantState.IDLE)
 
-        assertThat(viewModel.assistantState.value)
-            .isEqualTo(AssistantState.LISTENING)
+            // Update the source while the collector is active.
+            stateSource.value = AssistantState.LISTENING
+            runCurrent()
+
+            // Verify the external update is emitted.
+            assertThat(awaitItem()).isEqualTo(AssistantState.LISTENING)
+
+            // Ensure there are no unexpected duplicate emissions.
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
     }
 
-    
     @Test
     fun setIdleResetsActiveStates() = runTest(testDispatcher) {
         viewModel.assistantState.test {
-            // StateFlow immediately emits its current value.
             assertThat(awaitItem()).isEqualTo(AssistantState.IDLE)
 
-        val activeStates = listOf(
-            AssistantState.LISTENING,
-            AssistantState.THINKING,
-            AssistantState.SPEAKING
-        )
+            val activeStates = listOf(
+                AssistantState.LISTENING,
+                AssistantState.THINKING,
+                AssistantState.SPEAKING
+            )
 
-        activeStates.forEach { activeState ->
-            // Enter an active state and verify its emission.
-            viewModel.setState(activeState)
-            runCurrent()
-            assertThat(awaitItem()).isEqualTo(activeState)
+            activeStates.forEach { activeState ->
+                viewModel.setState(activeState)
+                runCurrent()
+                assertThat(awaitItem()).isEqualTo(activeState)
 
-            // Return to IDLE and verify the next emission.
-            viewModel.setIdle()
-            runCurrent()
-            assertThat(awaitItem()).isEqualTo(AssistantState.IDLE)
-        }
+                viewModel.setIdle()
+                runCurrent()
+                assertThat(awaitItem()).isEqualTo(AssistantState.IDLE)
+            }
 
-            // No unexpected or duplicate emissions should remain.
             expectNoEvents()
             cancelAndIgnoreRemainingEvents()
         }
