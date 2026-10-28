@@ -62,4 +62,5 @@ dependencies {
 
     // Almacenamiento seguro
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
 }
