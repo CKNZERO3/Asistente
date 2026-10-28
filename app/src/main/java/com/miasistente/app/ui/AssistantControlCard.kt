@@ -29,7 +29,6 @@ fun AssistantControlCard(
 ) {
     val context = LocalContext.current
     
-    // 1. Observe reactive state flow using lifecycle-aware collection
     val currentAvatarState by viewModel.assistantState.collectAsStateWithLifecycle()
     val isRunning by AsistenteService.isRunning.collectAsStateWithLifecycle()
     val audioState by AsistenteService.estadoAudio.collectAsStateWithLifecycle()
@@ -37,7 +36,6 @@ fun AssistantControlCard(
     var permissionDenied by remember { mutableStateOf(false) }
     var pendingStart by remember { mutableStateOf(false) }
 
-    // Required permissions depending on Android version
     val requiredPermissions = buildList {
         add(Manifest.permission.RECORD_AUDIO)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -45,7 +43,6 @@ fun AssistantControlCard(
         }
     }.toTypedArray()
 
-    // Permission launcher for runtime checks (removed invalid local 'const' modifier)
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
@@ -88,7 +85,6 @@ fun AssistantControlCard(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // 2. Centralized dynamic avatar view reacting to AssistantState
             Box(
                 modifier = Modifier
                     .size(110.dp)
@@ -98,7 +94,6 @@ fun AssistantControlCard(
                 AssistantAvatarView(currentState = currentAvatarState)
             }
 
-            // Status indicator row
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -125,7 +120,6 @@ fun AssistantControlCard(
                 )
             }
 
-            // 3. Clean button trigger mechanism with exhaustive if/else expression
             Button(
                 onClick = { triggerVoiceSessionToggle() },
                 colors = ButtonDefaults.buttonColors(
