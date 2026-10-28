@@ -9,13 +9,6 @@ import android.provider.MediaStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-/**
- * Ejecuta los comandos que NO necesitan internet.
- *
- * Nota sobre Musicolet: se usa el estándar de Android "reproducir desde búsqueda" y, si
- * Musicolet no lo atiende, simplemente se abre la app. Cuál de las dos ocurre depende de
- * Musicolet, no de nosotros: hay que probarlo en el teléfono.
- */
 class EjecutorLocal(context: Context) {
 
     private val appContext = context.applicationContext
@@ -51,26 +44,28 @@ class EjecutorLocal(context: Context) {
             ?: return ResultadoComando(false, "No pude abrir Musicolet.")
         abrirApp.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
 
-        if (consulta.isNotBlank()) {
-            val buscar = Intent(MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH).apply {
-                setPackage(PAQUETE_MUSICOLET)
-                putExtra(MediaStore.EXTRA_MEDIA_FOCUS, "vnd.android.cursor.item/*")
-                putExtra(SearchManager.QUERY, consulta)
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-            try {
-                appContext.startActivity(buscar)
-                return ResultadoComando(true, "Buscando «$consulta» en Musicolet")
-            } catch (e: ActivityNotFoundException) {
-                // Musicolet no atiende búsquedas: se abre la app normal (abajo)
+        val consultaLimpia = consulta.lowercase().trim()
+        if (consultaLimpia.isBlank() || consultaLimpia.contains("musicolet")) {
+            return try {
+                appContext.startActivity(abrirApp)
+                ResultadoComando(true, "Musicolet abierto")
+            } catch (e: Exception) {
+                ResultadoComando(false, "Android bloqueó abrir Musicolet desde segundo plano.")
             }
         }
 
-        return try {
+        val buscar = Intent(MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH).apply {
+            setPackage(PAQUETE_MUSICOLET)
+            putExtra(MediaStore.EXTRA_MEDIA_FOCUS, "vnd.android.cursor.item/*")
+            putExtra(SearchManager.QUERY, consulta)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        try {
+            appContext.startActivity(buscar)
+            return ResultadoComando(true, "Buscando «$consulta» en Musicolet")
+        } catch (e: ActivityNotFoundException) {
             appContext.startActivity(abrirApp)
-            ResultadoComando(true, "Musicolet abierto")
-        } catch (e: Exception) {
-            ResultadoComando(false, "Android bloqueó abrir Musicolet desde segundo plano.")
+            return ResultadoComando(true, "Musicolet abierto")
         }
     }
 }
