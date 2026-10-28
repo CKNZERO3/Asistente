@@ -1,16 +1,22 @@
-// AvatarRepositorio.kt
-import android.content.Context
-import android.net.Uri
-        import androidx.core.net.toUri
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.asStateFlow
+package com.miasistente.app.dominio
 
-class AvatarRepositorio(context: Context) {
-    private val _customAvatarUri = MutableStateFlow<Uri?>(null)
-    val customAvatarUri: Flow<Uri?> = _customAvatarUri.asStateFlow()
+sealed interface PersonalityProfile {
+    val id: String
+    val name: String
+    val systemPromptHook: String
+    val responseFormatter: (String) -> String
 
-    fun updateCustomAvatar(uri: Uri?) {
-        _customAvatarUri.value = uri
+    data object Academic : PersonalityProfile {
+        override val id = "academic"
+        override val name = "Academic"
+        override val systemPromptHook = "Respond with formal tone, precise technical vocabulary, and objective syntax."
+        override val responseFormatter: (String) -> String = { text -> "[$name]: $text" }
+    }
+
+    data object Jarvis : PersonalityProfile {
+        override val id = "jarvis"
+        override val name = "Butler/Jarvis"
+        override val systemPromptHook = "Respond with refined, respectful, sharp, and concise situational awareness."
+        override val responseFormatter: (String) -> String = { text -> "Sir, $text" }
     }
 }
