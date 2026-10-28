@@ -1,3 +1,4 @@
+
 // app/build.gradle.kts (MÓDULO APP)
 
 plugins {
@@ -28,12 +29,13 @@ android {
         }
     }
 
+    // JUnit 5 support
     testOptions {
-    unitTests.all {
-        it.useJUnitPlatform()
+        unitTests.all {
+            it.useJUnitPlatform()
         }
     }
-    
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -59,6 +61,7 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.9.3")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
 
     // Vosk Offline Speech Recognition
     implementation("com.alphacephei:vosk-android:0.3.47@aar") {
@@ -66,11 +69,10 @@ dependencies {
     }
     implementation("net.java.dev.jna:jna:5.13.0@aar")
 
-    // Almacenamiento seguro
+    // Secure storage
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
-    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
 
-    // Unit testing
+    // JUnit 5
     testImplementation("org.junit.jupiter:junit-jupiter-api:5.11.3")
     testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:5.11.3")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher:1.11.3")
@@ -81,4 +83,4 @@ dependencies {
     // Flow testing and assertions
     testImplementation("app.cash.turbine:turbine:1.2.0")
     testImplementation("com.google.truth:truth:1.4.4")
-    }
+}
