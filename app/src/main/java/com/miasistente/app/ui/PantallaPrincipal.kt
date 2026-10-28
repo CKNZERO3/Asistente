@@ -1,3 +1,4 @@
+
 package com.miasistente.app.ui
 
 import android.Manifest
@@ -48,6 +49,7 @@ data class ChatMessage(
 
 private fun permisosParaServicio(): List<String> = buildList {
     add(Manifest.permission.RECORD_AUDIO)
+
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         add(Manifest.permission.POST_NOTIFICATIONS)
     }
@@ -57,6 +59,7 @@ private fun permisosParaServicio(): List<String> = buildList {
 fun PantallaPrincipal() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+
     val ajustes = remember { Ajustes(context) }
     val almacen = remember { SecureStorage(context) }
     val procesador = remember { ProcesadorComandos(context) }
@@ -65,31 +68,43 @@ fun PantallaPrincipal() {
     val activo by AsistenteService.isRunning.collectAsStateWithLifecycle()
     val estado by AsistenteService.estadoAudio.collectAsStateWithLifecycle()
 
-    var selectedTab by remember { mutableIntStateOf(0) } // 0: Chat, 1: Notas, 2: Controles
+    var selectedTab by remember { mutableIntStateOf(0) }
 
     var chatMessages by remember {
         mutableStateOf(
             listOf(
-                ChatMessage("¡Hola! Soy tu asistente inteligente. ¿En qué puedo ayudarte?", isUser = false)
+                ChatMessage(
+                    text = "¡Hola! Soy tu asistente inteligente. ¿En qué puedo ayudarte?",
+                    isUser = false
+                )
             )
         )
     }
+
     var inputText by remember { mutableStateOf("") }
     var isSending by remember { mutableStateOf(false) }
 
     var notasList by remember { mutableStateOf(emptyList<Nota>()) }
+
     LaunchedEffect(selectedTab) {
         if (selectedTab == 1) {
-            notasList = withContext(Dispatchers.IO) { notasRepositorio.listar() }
+            notasList = withContext(Dispatchers.IO) {
+                notasRepositorio.listar()
+            }
         }
     }
 
-    var microfonoOk by remember { mutableStateOf(Permisos.microfono(context)) }
-    var superposicionOk by remember { mutableStateOf(Permisos.superposicion(context)) }
+    var microfonoOk by remember {
+        mutableStateOf(Permisos.microfono(context))
+    }
+    var superposicionOk by remember {
+        mutableStateOf(Permisos.superposicion(context))
+    }
     var microfonoDenegado by remember { mutableStateOf(false) }
     var iniciarTrasPermisos by remember { mutableStateOf(false) }
     var mensaje by remember { mutableStateOf<String?>(null) }
 
+    // Actualizar los permisos al regresar desde Ajustes del sistema.
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         microfonoOk = Permisos.microfono(context)
         superposicionOk = Permisos.superposicion(context)
@@ -99,9 +114,14 @@ fun PantallaPrincipal() {
         ActivityResultContracts.RequestMultiplePermissions()
     ) {
         microfonoOk = Permisos.microfono(context)
-        if (!microfonoOk) microfonoDenegado = true
+
+        if (!microfonoOk) {
+            microfonoDenegado = true
+        }
+
         if (iniciarTrasPermisos) {
             iniciarTrasPermisos = false
+
             if (microfonoOk) {
                 mensaje = null
                 AsistenteService.start(context)
@@ -111,20 +131,28 @@ fun PantallaPrincipal() {
         }
     }
 
-    var palabraEscrita by remember { mutableStateOf(ajustes.palabraClave) }
+    var palabraEscrita by remember {
+        mutableStateOf(ajustes.palabraClave)
+    }
 
     fun activarServicio() {
         val normalizada = Ajustes.normalizar(palabraEscrita)
+
         if (normalizada.isEmpty()) {
             mensaje = "Escribe una palabra clave (solo letras)."
             return
         }
+
         ajustes.palabraClave = normalizada
         palabraEscrita = normalizada
 
         val faltantes = permisosParaServicio().filter {
-            ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED
+            ContextCompat.checkSelfPermission(
+                context,
+                it
+            ) != PackageManager.PERMISSION_GRANTED
         }
+
         if (faltantes.isEmpty()) {
             mensaje = null
             AsistenteService.start(context)
@@ -135,10 +163,14 @@ fun PantallaPrincipal() {
     }
 
     var avatar by remember { mutableStateOf(ajustes.avatar) }
-    var imagenPersonalizada by remember { mutableStateOf<ImageBitmap?>(null) }
+    var imagenPersonalizada by remember {
+        mutableStateOf<ImageBitmap?>(null)
+    }
     var mensajeAvatar by remember { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(Unit) { imagenPersonalizada = AvatarRepositorio.cargar(context) }
+    LaunchedEffect(Unit) {
+        imagenPersonalizada = AvatarRepositorio.cargar(context)
+    }
 
     val lanzadorGaleria = rememberLauncherForActivityResult(
         ActivityResultContracts.GetContent()
@@ -158,12 +190,17 @@ fun PantallaPrincipal() {
     }
 
     var tieneClave by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) { tieneClave = withContext(Dispatchers.IO) { almacen.tieneApiKey() } }
+
+    LaunchedEffect(Unit) {
+        tieneClave = withContext(Dispatchers.IO) {
+            almacen.tieneApiKey()
+        }
+    }
 
     var overlayActivo by remember { mutableStateOf(false) }
 
     Box(
-        Modifier
+        modifier = Modifier
             .fillMaxSize()
             .background(Paleta.Fondo)
             .safeDrawingPadding(),
@@ -190,22 +227,33 @@ fun PantallaPrincipal() {
                             color = Paleta.Texto,
                             modifier = Modifier.weight(1f)
                         )
+
                         FilledTonalButton(
                             onClick = {
-                                if (superposicionOk) {
-                                    if (overlayActivo) {
-                                        OverlayAvatarService.stop(context)
-                                        overlayActivo = false
-                                    } else {
-                                        OverlayAvatarService.start(context)
-                                        overlayActivo = true
-                                    }
+                                // Verificar el permiso real cada vez que se pulsa.
+                                superposicionOk =
+                                    Permisos.superposicion(context)
+
+                                if (!superposicionOk) {
+                                    context.startActivity(
+                                        Permisos.intentSuperposicion(context)
+                                    )
+                                } else if (overlayActivo) {
+                                    OverlayAvatarService.stop(context)
+                                    overlayActivo = false
                                 } else {
-                                    context.startActivity(Permisos.intentSuperposicion(context))
+                                    OverlayAvatarService.start(context)
+                                    overlayActivo = true
                                 }
                             }
                         ) {
-                            Text(if (overlayActivo) "🪟 Ocultar Flotante" else "🪟 Avatar Flotante")
+                            Text(
+                                if (overlayActivo) {
+                                    "🪟 Ocultar Flotante"
+                                } else {
+                                    "🪟 Avatar Flotante"
+                                }
+                            )
                         }
                     }
                 }
@@ -221,11 +269,13 @@ fun PantallaPrincipal() {
                     onClick = { selectedTab = 0 },
                     text = { Text("💬 Chat") }
                 )
+
                 Tab(
                     selected = selectedTab == 1,
                     onClick = { selectedTab = 1 },
                     text = { Text("📝 Notas") }
                 )
+
                 Tab(
                     selected = selectedTab == 2,
                     onClick = { selectedTab = 2 },
@@ -246,19 +296,40 @@ fun PantallaPrincipal() {
                         onInputChanged = { inputText = it },
                         isSending = isSending,
                         onSend = { query ->
-                            if (query.isBlank()) return@ChatTabContent
-                            val userMsg = ChatMessage(query, isUser = true)
-                            chatMessages = chatMessages + userMsg
+                            if (query.isBlank() || isSending) {
+                                return@ChatTabContent
+                            }
+
+                            chatMessages = chatMessages + ChatMessage(
+                                text = query,
+                                isUser = true
+                            )
+
                             inputText = ""
                             isSending = true
+
                             scope.launch {
-                                val resultado = procesador.procesar(query)
-                                chatMessages = chatMessages + ChatMessage(resultado.mensaje, isUser = false)
-                                isSending = false
+                                try {
+                                    val resultado = procesador.procesar(query)
+
+                                    chatMessages = chatMessages + ChatMessage(
+                                        text = resultado.mensaje,
+                                        isUser = false
+                                    )
+                                } catch (exception: Exception) {
+                                    chatMessages = chatMessages + ChatMessage(
+                                        text = "No pude procesar el comando. Inténtalo de nuevo.",
+                                        isUser = false
+                                    )
+                                } finally {
+                                    isSending = false
+                                }
                             }
                         }
                     )
+
                     1 -> NotesTabContent(notes = notasList)
+
                     2 -> ControlsTabContent(
                         activo = activo,
                         estado = estado,
@@ -272,23 +343,53 @@ fun PantallaPrincipal() {
                         tieneClave = tieneClave,
                         onActivarServicio = { activarServicio() },
                         onPedirMicrofono = {
-                            if (microfonoDenegado) context.startActivity(Permisos.intentAjustesApp(context))
-                            else lanzadorPermisos.launch(arrayOf(Manifest.permission.RECORD_AUDIO))
+                            if (microfonoDenegado) {
+                                context.startActivity(
+                                    Permisos.intentAjustesApp(context)
+                                )
+                            } else {
+                                lanzadorPermisos.launch(
+                                    arrayOf(Manifest.permission.RECORD_AUDIO)
+                                )
+                            }
                         },
-                        onPedirSuperposicion = { context.startActivity(Permisos.intentSuperposicion(context)) },
-                        onSeleccionarAvatar = { avatar = it; ajustes.avatar = it },
-                        onElegirGaleria = { lanzadorGaleria.launch("image/*") },
+                        onPedirSuperposicion = {
+                            context.startActivity(
+                                Permisos.intentSuperposicion(context)
+                            )
+                        },
+                        onSeleccionarAvatar = {
+                            avatar = it
+                            ajustes.avatar = it
+                        },
+                        onElegirGaleria = {
+                            lanzadorGaleria.launch("image/*")
+                        },
                         onGuardarClave = { clave ->
                             scope.launch {
-                                withContext(Dispatchers.IO) { almacen.guardarApiKey(clave) }
+                                withContext(Dispatchers.IO) {
+                                    almacen.guardarApiKey(clave)
+                                }
                                 tieneClave = true
                             }
                         },
                         onProbarComando = { texto ->
                             scope.launch {
-                                val res = procesador.procesar(texto)
-                                chatMessages = chatMessages + ChatMessage("Prueba [$texto]: ${res.mensaje}", isUser = false)
-                                selectedTab = 0
+                                try {
+                                    val res = procesador.procesar(texto)
+
+                                    chatMessages = chatMessages + ChatMessage(
+                                        text = "Prueba [$texto]: ${res.mensaje}",
+                                        isUser = false
+                                    )
+                                    selectedTab = 0
+                                } catch (exception: Exception) {
+                                    chatMessages = chatMessages + ChatMessage(
+                                        text = "Error al probar el comando. Inténtalo de nuevo.",
+                                        isUser = false
+                                    )
+                                    selectedTab = 0
+                                }
                             }
                         }
                     )
@@ -327,11 +428,15 @@ fun ChatTabContent(
             OutlinedTextField(
                 value = inputText,
                 onValueChange = onInputChanged,
-                placeholder = { Text("Escribe un mensaje o comando...") },
+                placeholder = {
+                    Text("Escribe un mensaje o comando...")
+                },
                 modifier = Modifier.weight(1f),
                 singleLine = true
             )
+
             Spacer(Modifier.width(8.dp))
+
             Button(
                 onClick = { onSend(inputText) },
                 enabled = inputText.isNotBlank() && !isSending
@@ -344,9 +449,14 @@ fun ChatTabContent(
 
 @Composable
 fun ChatBubble(message: ChatMessage) {
-    val alignment = if (message.isUser) Alignment.End else Alignment.Start
-    val backgroundColor = if (message.isUser) Paleta.Primario else Paleta.TarjetaAlta
-    val textColor = if (message.isUser) Paleta.SobrePrimario else Paleta.Texto
+    val alignment =
+        if (message.isUser) Alignment.End else Alignment.Start
+
+    val backgroundColor =
+        if (message.isUser) Paleta.Primario else Paleta.TarjetaAlta
+
+    val textColor =
+        if (message.isUser) Paleta.SobrePrimario else Paleta.Texto
 
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -389,10 +499,24 @@ fun NotesTabContent(notes: List<Nota>) {
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
-                        Text(note.texto, color = Paleta.Texto, fontWeight = FontWeight.Medium)
+                        Text(
+                            text = note.texto,
+                            color = Paleta.Texto,
+                            fontWeight = FontWeight.Medium
+                        )
+
                         Spacer(Modifier.height(4.dp))
-                        val fechaStr = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(Date(note.fechaMs))
-                        Text(fechaStr, color = Paleta.TextoSuave, style = MaterialTheme.typography.bodySmall)
+
+                        val fechaStr = SimpleDateFormat(
+                            "dd/MM/yyyy HH:mm",
+                            Locale.getDefault()
+                        ).format(Date(note.fechaMs))
+
+                        Text(
+                            text = fechaStr,
+                            color = Paleta.TextoSuave,
+                            style = MaterialTheme.typography.bodySmall
+                        )
                     }
                 }
             }
@@ -435,12 +559,17 @@ fun ControlsTabContent(
             onPedirSuperposicion = onPedirSuperposicion
         )
 
-        Tarjeta(titulo = "Palabra clave", emoji = "🗝️") {
+        Tarjeta(
+            titulo = "Palabra clave",
+            emoji = "🗝️"
+        ) {
             OutlinedTextField(
                 value = palabraEscrita,
                 onValueChange = onPalabraChanged,
                 enabled = !activo,
-                label = { Text("Palabra o frase de activación") },
+                label = {
+                    Text("Palabra o frase de activación")
+                },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth()
             )
