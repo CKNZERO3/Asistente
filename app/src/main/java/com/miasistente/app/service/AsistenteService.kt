@@ -210,7 +210,6 @@ class AsistenteService : Service() {
     private fun procesarFrame(muestras: ShortArray, cantidad: Int) {
         val voz = detector.procesar(muestras, cantidad)
 
-        // Map voice activity to LISTENING state if not busy thinking or speaking
         if (_isRunning.value && _assistantState.value != AssistantState.THINKING && _assistantState.value != AssistantState.SPEAKING) {
             if (voz.hayVoz) {
                 _assistantState.update { AssistantState.LISTENING }
@@ -251,13 +250,13 @@ class AsistenteService : Service() {
     }
 
     private fun alDetectarPalabra(texto: String) {
+        if (texto.isBlank()) return
         contadorActivaciones++
-        Log.d(TAG, "¡Palabra clave detectada! (#$contadorActivaciones) texto=«$texto»")
+        Log.d(TAG, "¡Comando de voz transcrito! (#$contadorActivaciones) texto=«$texto»")
         _estadoAudio.update {
             it.copy(activaciones = contadorActivaciones, ultimoTexto = texto)
         }
 
-        // Transition to THINKING when keyword is matched and prompt is sent/processed
         _assistantState.update { AssistantState.THINKING }
 
         scope.launch {
@@ -265,13 +264,11 @@ class AsistenteService : Service() {
                 val procesador = com.miasistente.app.comandos.ProcesadorComandos(applicationContext)
                 procesador.procesar(texto)
 
-                // Transition to SPEAKING when response output starts
                 _assistantState.update { AssistantState.SPEAKING }
-                kotlinx.coroutines.delay(2500L) // Simulate response delivery duration
+                kotlinx.coroutines.delay(2500L)
             } catch (e: Exception) {
                 Log.e(TAG, "Error procesando comando tras activación", e)
             } finally {
-                // Return to IDLE state once done
                 _assistantState.update { AssistantState.IDLE }
             }
         }
