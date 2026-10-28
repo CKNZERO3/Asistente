@@ -46,6 +46,9 @@
             android:exported="false"
             android:foregroundServiceType="microphone" />
 
+        <service
+            android:name=".service.OverlayAvatarService"
+            android:exported="false" />
     </application>
 
 </manifest>
