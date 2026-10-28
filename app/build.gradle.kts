@@ -4,6 +4,8 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+import java.util.Properties // <--- ASEGÚRATE DE IMPORTAR ESTO ARRIBA
+
 android {
     namespace = "com.miasistente.app"
     compileSdk = 35
@@ -19,8 +21,8 @@ android {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a")
         }
 
-        // Read local.properties safely for zero-config local builds and CI injection
-        val localProperties = java.util.Properties().apply {
+        // Leer local.properties de forma segura
+        val localProperties = Properties().apply {
             val file = rootProject.file("local.properties")
             if (file.exists()) {
                 load(file.inputStream())
@@ -63,30 +65,30 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.material3:material3")
 
-    // Android core
+    // Android core[cite: 13]
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.activity:activity-compose:1.9.3")
 
-    // Lifecycle
+    // Lifecycle[cite: 13]
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
 
-    // Kotlin Coroutines — aligned to 1.9.0
+    // Kotlin Coroutines[cite: 13]
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
 
-    // Voice recognition
+    // Voice recognition[cite: 13]
     implementation("com.alphacephei:vosk-android:0.3.47@aar") {
         isTransitive = true
     }
     implementation("net.java.dev.jna:jna:5.13.0@aar")
 
-    // Security
+    // Security[cite: 13]
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
 
-    // Unit testing
+    // Unit testing[cite: 13]
     testImplementation("org.junit.jupiter:junit-jupiter-api:5.11.3")
     testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:5.11.3")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher:1.11.3")
