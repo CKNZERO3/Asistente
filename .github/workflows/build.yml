@@ -1,4 +1,5 @@
-name: Build APK
+```yaml
+name: Build APK and Run Tests
 
 on:
   push:
@@ -29,12 +30,16 @@ jobs:
           gradle-version: "8.10.2"
 
       - name: Aceptar licencias del SDK
-        run: yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses || true
+
+      - name: Verificar dependencias de pruebas
+        run: gradle :app:dependencies --configuration debugUnitTestCompileClasspath
+
+      - name: Ejecutar pruebas unitarias
+        run: gradle :app:testDebugUnitTest --stacktrace
 
       - name: Compilar APK debug
-        run: gradle assembleDebug --stacktrace
-      - name: Run unit tests
-        run: gradle :app:testDebugUnitTest
+        run: gradle :app:assembleDebug --stacktrace
 
       - name: Guardar APK como descarga
         uses: actions/upload-artifact@v4
@@ -42,3 +47,4 @@ jobs:
           name: asistente-debug-apk
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
+```
