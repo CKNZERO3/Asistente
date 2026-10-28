@@ -6,34 +6,14 @@ import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawingPadding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Switch
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
@@ -44,20 +24,27 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.miasistente.app.comandos.Nota
+import com.miasistente.app.comandos.NotasRepositorio
 import com.miasistente.app.comandos.ProcesadorComandos
-import com.miasistente.app.comandos.ResultadoComando
 import com.miasistente.app.data.Ajustes
 import com.miasistente.app.data.AvatarRepositorio
 import com.miasistente.app.data.Permisos
 import com.miasistente.app.data.SecureStorage
-import com.miasistente.app.dominio.AssistantState
 import com.miasistente.app.service.AsistenteService
-import com.miasistente.app.ui.avatar.AssistantAvatarView
+import com.miasistente.app.service.OverlayAvatarService
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlin.math.roundToInt
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+
+data class ChatMessage(
+    val text: String,
+    val isUser: Boolean,
+    val timestamp: Long = System.currentTimeMillis()
+)
 
 private fun permisosParaServicio(): List<String> = buildList {
     add(Manifest.permission.RECORD_AUDIO)
@@ -73,12 +60,29 @@ fun PantallaPrincipal() {
     val ajustes = remember { Ajustes(context) }
     val almacen = remember { SecureStorage(context) }
     val procesador = remember { ProcesadorComandos(context) }
+    val notasRepositorio = remember { NotasRepositorio(context) }
 
     val activo by AsistenteService.isRunning.collectAsStateWithLifecycle()
     val estado by AsistenteService.estadoAudio.collectAsStateWithLifecycle()
 
-    // Collect real-time lifecycle states directly from AsistenteService background bridge
-    val currentAvatarState by AsistenteService.assistantState.collectAsStateWithLifecycle()
+    var selectedTab by remember { mutableIntStateOf(0) } // 0: Chat, 1: Notas, 2: Controles
+
+    var chatMessages by remember {
+        mutableStateOf(
+            listOf(
+                ChatMessage("¡Hola! Soy tu asistente inteligente. ¿En qué puedo ayudarte?", isUser = false)
+            )
+        )
+    }
+    var inputText by remember { mutableStateOf("") }
+    var isSending by remember { mutableStateOf(false) }
+
+    var notasList by remember { mutableStateOf(emptyList<Nota>()) }
+    LaunchedEffect(selectedTab) {
+        if (selectedTab == 1) {
+            notasList = withContext(Dispatchers.IO) { notasRepositorio.listar() }
+        }
+    }
 
     var microfonoOk by remember { mutableStateOf(Permisos.microfono(context)) }
     var superposicionOk by remember { mutableStateOf(Permisos.superposicion(context)) }
@@ -154,44 +158,9 @@ fun PantallaPrincipal() {
     }
 
     var tieneClave by remember { mutableStateOf(false) }
-    var probando by remember { mutableStateOf(false) }
-    var resultado by remember { mutableStateOf<ResultadoComando?>(null) }
-
     LaunchedEffect(Unit) { tieneClave = withContext(Dispatchers.IO) { almacen.tieneApiKey() } }
 
-    var mostrarActivacion by remember { mutableStateOf(false) }
-    LaunchedEffect(estado.activaciones) {
-        if (estado.activaciones > 0) {
-            mostrarActivacion = true
-            delay(3_000)
-            mostrarActivacion = false
-        } else {
-            mostrarActivacion = false
-        }
-    }
-
-    val preparando = activo && estado.preparandoModelo
-    val capturando = activo && estado.capturando
-    val palabra = estado.palabraClave.ifEmpty { ajustes.palabraClave }
-
-    val textoEstado = when {
-        !activo -> "Detenido"
-        mostrarActivacion -> "¡Te escuché!"
-        preparando && estado.progresoModelo >= 0 -> "Descargando modelo… ${estado.progresoModelo} %"
-        preparando -> "Cargando modelo de voz…"
-        estado.hayVoz -> "Oyendo una voz"
-        estado.capturando -> "Esperando «$palabra»"
-        else -> "Abriendo micrófono…"
-    }
-    val colorEstado = when {
-        !activo -> Paleta.TextoSuave
-        mostrarActivacion -> Paleta.Morado
-        preparando -> Paleta.Ambar
-        estado.hayVoz -> Paleta.Azul
-        estado.capturando -> Paleta.Verde
-        else -> Paleta.Ambar
-    }
-    val textoError = mensaje ?: estado.error
+    var overlayActivo by remember { mutableStateOf(false) }
 
     Box(
         Modifier
@@ -204,149 +173,293 @@ fun PantallaPrincipal() {
             modifier = Modifier
                 .widthIn(max = 640.dp)
                 .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // 1) Encabezado con interruptor y Avatar Animado vinculado al estado del servicio
-            Tarjeta(titulo = "Asistente IA", emoji = "🎙️") {
-
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 12.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    AssistantAvatarView(currentState = currentAvatarState)
-                }
-
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        Modifier
-                            .size(10.dp)
-                            .background(colorEstado, CircleShape)
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        text = textoEstado,
-                        color = colorEstado,
-                        fontWeight = FontWeight.Medium,
-                        modifier = Modifier.weight(1f)
-                    )
-                    Switch(
-                        checked = activo,
-                        onCheckedChange = { encender ->
-                            if (encender) activarServicio() else AsistenteService.stop(context)
-                        }
-                    )
-                }
-
-                if (preparando) {
-                    Spacer(Modifier.height(12.dp))
-                    if (estado.progresoModelo >= 0) {
-                        LinearProgressIndicator(
-                            progress = { estado.progresoModelo / 100f },
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                        Spacer(Modifier.height(4.dp))
+            Surface(
+                color = Paleta.Tarjeta,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         Text(
-                            "Solo la primera vez (≈ 39 MB). Mantén la app abierta.",
-                            color = Paleta.TextoSuave,
-                            style = MaterialTheme.typography.bodySmall
+                            text = "🤖 Asistente IA",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = Paleta.Texto,
+                            modifier = Modifier.weight(1f)
                         )
-                    } else {
-                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                        FilledTonalButton(
+                            onClick = {
+                                if (superposicionOk) {
+                                    if (overlayActivo) {
+                                        OverlayAvatarService.stop(context)
+                                        overlayActivo = false
+                                    } else {
+                                        OverlayAvatarService.start(context)
+                                        overlayActivo = true
+                                    }
+                                } else {
+                                    context.startActivity(Permisos.intentSuperposicion(context))
+                                }
+                            }
+                        ) {
+                            Text(if (overlayActivo) "🪟 Ocultar Flotante" else "🪟 Avatar Flotante")
+                        }
                     }
-                }
-
-                if (capturando) {
-                    val nivel = ((estado.nivelDb + 70f) / 60f).coerceIn(0f, 1f)
-                    Spacer(Modifier.height(12.dp))
-                    LinearProgressIndicator(progress = { nivel }, modifier = Modifier.fillMaxWidth())
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        text = "Nivel: ${estado.nivelDb.roundToInt()} dB · Reconocido: " +
-                            (if (estado.ultimoTexto.isEmpty()) "—" else "«${estado.ultimoTexto}»") +
-                            " · Activaciones: ${estado.activaciones}",
-                        color = Paleta.TextoSuave,
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                }
-
-                textoError?.let {
-                    Spacer(Modifier.height(12.dp))
-                    Text(it, color = Paleta.Rojo, style = MaterialTheme.typography.bodyMedium)
                 }
             }
 
-            // 2) Permisos
-            SeccionPermisos(
-                microfonoOk = microfonoOk,
-                superposicionOk = superposicionOk,
-                onPedirMicrofono = {
-                    if (microfonoDenegado) {
-                        context.startActivity(Permisos.intentAjustesApp(context))
-                    } else {
-                        lanzadorPermisos.launch(arrayOf(Manifest.permission.RECORD_AUDIO))
-                    }
-                },
-                onPedirSuperposicion = {
-                    context.startActivity(Permisos.intentSuperposicion(context))
-                }
-            )
-
-            // 3) Palabra clave
-            Tarjeta(titulo = "Palabra clave", emoji = "🗝️") {
-                OutlinedTextField(
-                    value = palabraEscrita,
-                    onValueChange = { palabraEscrita = it.take(30) },
-                    enabled = !activo,
-                    label = { Text("Palabra o frase de activación") },
-                    placeholder = { Text("Oye Asistente") },
-                    singleLine = true,
-                    supportingText = {
-                        Text(
-                            if (activo) "Apaga el asistente para cambiarla"
-                            else "Palabras comunes del español, de 3 o más sílabas. Los nombres raros pueden no reconocerse."
-                        )
-                    },
-                    modifier = Modifier.fillMaxWidth()
+            TabRow(
+                selectedTabIndex = selectedTab,
+                containerColor = Paleta.Tarjeta,
+                contentColor = Paleta.Primario
+            ) {
+                Tab(
+                    selected = selectedTab == 0,
+                    onClick = { selectedTab = 0 },
+                    text = { Text("💬 Chat") }
+                )
+                Tab(
+                    selected = selectedTab == 1,
+                    onClick = { selectedTab = 1 },
+                    text = { Text("📝 Notas") }
+                )
+                Tab(
+                    selected = selectedTab == 2,
+                    onClick = { selectedTab = 2 },
+                    text = { Text("⚙️ Controles") }
                 )
             }
 
-            // 4) Avatar
-            SeccionAvatar(
-                seleccionado = avatar,
-                imagenPersonalizada = imagenPersonalizada,
-                mensaje = mensajeAvatar,
-                onSeleccionar = {
-                    avatar = it
-                    ajustes.avatar = it
-                },
-                onElegirGaleria = { lanzadorGaleria.launch("image/*") }
-            )
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .padding(16.dp)
+            ) {
+                when (selectedTab) {
+                    0 -> ChatTabContent(
+                        messages = chatMessages,
+                        inputText = inputText,
+                        onInputChanged = { inputText = it },
+                        isSending = isSending,
+                        onSend = { query ->
+                            if (query.isBlank()) return@ChatTabContent
+                            val userMsg = ChatMessage(query, isUser = true)
+                            chatMessages = chatMessages + userMsg
+                            inputText = ""
+                            isSending = true
+                            scope.launch {
+                                val resultado = procesador.procesar(query)
+                                chatMessages = chatMessages + ChatMessage(resultado.mensaje, isUser = false)
+                                isSending = false
+                            }
+                        }
+                    )
+                    1 -> NotesTabContent(notes = notasList)
+                    2 -> ControlsTabContent(
+                        activo = activo,
+                        estado = estado,
+                        microfonoOk = microfonoOk,
+                        superposicionOk = superposicionOk,
+                        palabraEscrita = palabraEscrita,
+                        onPalabraChanged = { palabraEscrita = it },
+                        avatar = avatar,
+                        imagenPersonalizada = imagenPersonalizada,
+                        mensajeAvatar = mensajeAvatar,
+                        tieneClave = tieneClave,
+                        onActivarServicio = { activarServicio() },
+                        onPedirMicrofono = {
+                            if (microfonoDenegado) context.startActivity(Permisos.intentAjustesApp(context))
+                            else lanzadorPermisos.launch(arrayOf(Manifest.permission.RECORD_AUDIO))
+                        },
+                        onPedirSuperposicion = { context.startActivity(Permisos.intentSuperposicion(context)) },
+                        onSeleccionarAvatar = { avatar = it; ajustes.avatar = it },
+                        onElegirGaleria = { lanzadorGaleria.launch("image/*") },
+                        onGuardarClave = { clave ->
+                            scope.launch {
+                                withContext(Dispatchers.IO) { almacen.guardarApiKey(clave) }
+                                tieneClave = true
+                            }
+                        },
+                        onProbarComando = { texto ->
+                            scope.launch {
+                                val res = procesador.procesar(texto)
+                                chatMessages = chatMessages + ChatMessage("Prueba [$texto]: ${res.mensaje}", isUser = false)
+                                selectedTab = 0
+                            }
+                        }
+                    )
+                }
+            }
+        }
+    }
+}
 
-            // 5) Capacidades
-            SeccionCapacidades(
-                tieneClave = tieneClave,
-                probando = probando,
-                resultado = resultado,
-                onGuardarClave = { clave ->
-                    scope.launch {
-                        withContext(Dispatchers.IO) { almacen.guardarApiKey(clave) }
-                        tieneClave = true
-                    }
-                },
-                onProbar = { texto ->
-                    scope.launch {
-                        probando = true
-                        resultado = procesador.procesar(texto)
-                        probando = false
+@Composable
+fun ChatTabContent(
+    messages: List<ChatMessage>,
+    inputText: String,
+    onInputChanged: (String) -> Unit,
+    isSending: Boolean,
+    onSend: (String) -> Unit
+) {
+    Column(modifier = Modifier.fillMaxSize()) {
+        LazyColumn(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            items(messages) { msg ->
+                ChatBubble(message = msg)
+            }
+        }
+
+        Spacer(Modifier.height(8.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            OutlinedTextField(
+                value = inputText,
+                onValueChange = onInputChanged,
+                placeholder = { Text("Escribe un mensaje o comando...") },
+                modifier = Modifier.weight(1f),
+                singleLine = true
+            )
+            Spacer(Modifier.width(8.dp))
+            Button(
+                onClick = { onSend(inputText) },
+                enabled = inputText.isNotBlank() && !isSending
+            ) {
+                Text(if (isSending) "..." else "Enviar")
+            }
+        }
+    }
+}
+
+@Composable
+fun ChatBubble(message: ChatMessage) {
+    val alignment = if (message.isUser) Alignment.End else Alignment.Start
+    val backgroundColor = if (message.isUser) Paleta.Primario else Paleta.TarjetaAlta
+    val textColor = if (message.isUser) Paleta.SobrePrimario else Paleta.Texto
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = alignment
+    ) {
+        Surface(
+            shape = RoundedCornerShape(16.dp),
+            color = backgroundColor,
+            modifier = Modifier.widthIn(max = 280.dp)
+        ) {
+            Text(
+                text = message.text,
+                color = textColor,
+                modifier = Modifier.padding(12.dp),
+                style = MaterialTheme.typography.bodyMedium
+            )
+        }
+    }
+}
+
+@Composable
+fun NotesTabContent(notes: List<Nota>) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        if (notes.isEmpty()) {
+            Text(
+                text = "No hay notas guardadas aún.",
+                color = Paleta.TextoSuave,
+                modifier = Modifier.padding(top = 24.dp)
+            )
+        } else {
+            notes.forEach { note ->
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = Paleta.Tarjeta,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text(note.texto, color = Paleta.Texto, fontWeight = FontWeight.Medium)
+                        Spacer(Modifier.height(4.dp))
+                        val fechaStr = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(Date(note.fechaMs))
+                        Text(fechaStr, color = Paleta.TextoSuave, style = MaterialTheme.typography.bodySmall)
                     }
                 }
-            )
-
-            Spacer(Modifier.height(8.dp))
+            }
         }
+    }
+}
+
+@Composable
+fun ControlsTabContent(
+    activo: Boolean,
+    estado: com.miasistente.app.service.EstadoAudio,
+    microfonoOk: Boolean,
+    superposicionOk: Boolean,
+    palabraEscrita: String,
+    onPalabraChanged: (String) -> Unit,
+    avatar: String,
+    imagenPersonalizada: ImageBitmap?,
+    mensajeAvatar: String?,
+    tieneClave: Boolean,
+    onActivarServicio: () -> Unit,
+    onPedirMicrofono: () -> Unit,
+    onPedirSuperposicion: () -> Unit,
+    onSeleccionarAvatar: (String) -> Unit,
+    onElegirGaleria: () -> Unit,
+    onGuardarClave: (String) -> Unit,
+    onProbarComando: (String) -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        AssistantControlCard()
+
+        SeccionPermisos(
+            microfonoOk = microfonoOk,
+            superposicionOk = superposicionOk,
+            onPedirMicrofono = onPedirMicrofono,
+            onPedirSuperposicion = onPedirSuperposicion
+        )
+
+        Tarjeta(titulo = "Palabra clave", emoji = "🗝️") {
+            OutlinedTextField(
+                value = palabraEscrita,
+                onValueChange = onPalabraChanged,
+                enabled = !activo,
+                label = { Text("Palabra o frase de activación") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+
+        SeccionAvatar(
+            seleccionado = avatar,
+            imagenPersonalizada = imagenPersonalizada,
+            mensaje = mensajeAvatar,
+            onSeleccionar = onSeleccionarAvatar,
+            onElegirGaleria = onElegirGaleria
+        )
+
+        SeccionCapacidades(
+            tieneClave = tieneClave,
+            probando = false,
+            resultado = null,
+            onGuardarClave = onGuardarClave,
+            onProbar = onProbarComando
+        )
     }
 }
