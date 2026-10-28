@@ -28,8 +28,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -46,6 +49,11 @@ data class EstadoAudio(
     val palabraClave: String = "",
     val ultimoTexto: String = "",
     val activaciones: Int = 0
+)
+
+data class EventoComandoVoz(
+    val comandoUsuario: String,
+    val respuesta: String
 )
 
 private class ModeloDanadoException(causa: Throwable) : Exception(causa)
@@ -67,9 +75,11 @@ class AsistenteService : Service() {
         private val _estadoAudio = MutableStateFlow(EstadoAudio())
         val estadoAudio: StateFlow<EstadoAudio> = _estadoAudio.asStateFlow()
 
-        // Reactive bridge for UI Avatar states
         private val _assistantState = MutableStateFlow(AssistantState.IDLE)
         val assistantState: StateFlow<AssistantState> = _assistantState.asStateFlow()
+
+        private val _eventosComando = MutableSharedFlow<EventoComandoVoz>()
+        val eventosComando: SharedFlow<EventoComandoVoz> = _eventosComando.asSharedFlow()
 
         fun updateAssistantState(state: AssistantState) {
             _assistantState.value = state
@@ -252,7 +262,7 @@ class AsistenteService : Service() {
     private fun alDetectarPalabra(texto: String) {
         if (texto.isBlank()) return
         contadorActivaciones++
-        Log.d(TAG, "¡Comando de voz transcrito! (#$contadorActivaciones) texto=«$texto»")
+        Log.d(TAG, "¡Comando transcrito! (#$contadorActivaciones) texto=«$texto»")
         _estadoAudio.update {
             it.copy(activaciones = contadorActivaciones, ultimoTexto = texto)
         }
@@ -262,10 +272,12 @@ class AsistenteService : Service() {
         scope.launch {
             try {
                 val procesador = com.miasistente.app.comandos.ProcesadorComandos(applicationContext)
-                procesador.procesar(texto)
+                val resultado = procesador.procesar(texto)
+
+                _eventosComando.emit(EventoComandoVoz(comandoUsuario = texto, respuesta = resultado.mensaje))
 
                 _assistantState.update { AssistantState.SPEAKING }
-                kotlinx.coroutines.delay(2500L)
+                kotlinx.coroutines.delay(2000L)
             } catch (e: Exception) {
                 Log.e(TAG, "Error procesando comando tras activación", e)
             } finally {
