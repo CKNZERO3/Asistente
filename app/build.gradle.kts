@@ -63,4 +63,15 @@ dependencies {
     // Almacenamiento seguro
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
+    // Unit testing
+    testImplementation("org.junit.jupiter:junit-jupiter-api:5.11.3")
+    testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:5.11.3")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher:1.11.3")
+
+    // Coroutine testing
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
+
+    // Flow testing and assertions
+    testImplementation("app.cash.turbine:turbine:1.2.0")
+    testImplementation("com.google.truth:truth:1.4.4")
 }
