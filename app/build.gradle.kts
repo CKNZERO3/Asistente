@@ -1,6 +1,3 @@
-
-// app/build.gradle.kts (MÓDULO APP)
-
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -29,7 +26,6 @@ android {
         }
     }
 
-    // JUnit 5 support
     testOptions {
         unitTests.all {
             it.useJUnitPlatform()
@@ -56,14 +52,14 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.material3:material3")
 
-    // AndroidX & Core
+    // AndroidX
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.activity:activity-compose:1.9.3")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
 
-    // Vosk Offline Speech Recognition
+    // Vosk speech recognition
     implementation("com.alphacephei:vosk-android:0.3.47@aar") {
         isTransitive = true
     }
@@ -77,7 +73,7 @@ dependencies {
     testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:5.11.3")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher:1.11.3")
 
-    // Coroutine testing
+    // Required for StandardTestDispatcher
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
 
     // Flow testing and assertions
