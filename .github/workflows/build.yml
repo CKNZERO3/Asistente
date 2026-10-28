@@ -33,6 +33,8 @@ jobs:
 
       - name: Compilar APK debug
         run: gradle assembleDebug --stacktrace
+      - name: Run unit tests
+        run: gradle :app:testDebugUnitTest
 
       - name: Guardar APK como descarga
         uses: actions/upload-artifact@v4
