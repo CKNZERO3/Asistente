@@ -10,33 +10,6 @@ import org.vosk.LogLevel
 import org.vosk.Model
 import org.vosk.Recognizer
 
-/**
- * Detector de palabra clave basado en Vosk (reconocimiento de voz offline).
- *
- * Idea: en vez de reconocer cualquier cosa, le damos a Vosk una "gramática" mínima con
- * solo dos opciones: tu palabra clave y "[unk]" (cualquier otra cosa). Así el modelo solo
- * decide "¿dijo la palabra clave o no?", que es mucho más barato y preciso que transcribir.
- * Cambiar la palabra clave es cambiar un texto: no hay que entrenar nada.
- *
- * Ahorro de batería: Vosk SOLO trabaja mientras el VoiceDetector dice que hay voz.
- * En silencio, este motor solo guarda los últimos frames en una memoria circular.
- *
- * Memoria circular (preroll): el VoiceDetector tarda ~96 ms en confirmar que hay voz, y
- * sin ayuda se perdería el comienzo de la palabra. Por eso se guardan los últimos
- * PREROLL_FRAMES frames y, cuando empieza la voz, se entregan primero a Vosk.
- *
- * Limitaciones conocidas:
- *  - La palabra clave debe existir en el vocabulario del modelo (palabras comunes del
- *    español). Si no existe, Vosk la ignora y nunca se activará. Revisa "Último reconocido"
- *    en pantalla para comprobarlo.
- *  - Una gramática tan pequeña puede dar falsos positivos con palabras parecidas. Se
- *    reduce exigiendo una confianza mínima (parámetro [confianzaMinima]).
- *
- * @param rutaModelo carpeta del modelo ya descomprimido
- * @param palabraClave palabra o frase a detectar (se normaliza a minúsculas y solo letras)
- * @param confianzaMinima 0..1; súbela si hay falsas activaciones, bájala si no te detecta
- * @throws java.io.IOException si el modelo no se puede cargar
- */
 class VoskWakeWord(
     rutaModelo: String,
     palabraClave: String,
@@ -45,7 +18,7 @@ class VoskWakeWord(
 
     private companion object {
         const val TAG = "VoskWakeWord"
-        const val PREROLL_FRAMES = 10 // 10 × 32 ms = 320 ms de audio previo
+        const val PREROLL_FRAMES = 10
     }
 
     override val palabraClave: String = Ajustes.normalizar(palabraClave)
@@ -60,71 +33,97 @@ class VoskWakeWord(
         LibVosk.setLogLevel(LogLevel.WARNINGS)
     }
 
-    // Carga el modelo (puede tardar 1-3 segundos y lanza IOException si está dañado)
     private val model: Model = Model(rutaModelo)
 
-    private val recognizer: Recognizer = try {
-        // Gramática: ["tu palabra", "[unk]"]  (JSONArray escapa bien cualquier carácter)
+    // Recognizer con gramática estricta para la palabra clave
+    private val recognizerWake: Recognizer = try {
         val gramatica = JSONArray().put(this.palabraClave).put("[unk]").toString()
         Recognizer(model, AudioRecorder.SAMPLE_RATE.toFloat(), gramatica).also {
-            it.setWords(true) // incluye la confianza de cada palabra en el resultado
+            it.setWords(true)
         }
     } catch (e: Throwable) {
         model.close()
         throw e
     }
 
-    // Memoria circular de los últimos frames (se reutilizan los arreglos, sin crear basura)
+    // Recognizer de vocabulario libre para transcribir el comando completo tras la activación
+    private val recognizerCommand: Recognizer = Recognizer(model, AudioRecorder.SAMPLE_RATE.toFloat())
+
     private val preroll = Array(PREROLL_FRAMES) { ShortArray(AudioRecorder.FRAME_SIZE) }
     private val prerollLargo = IntArray(PREROLL_FRAMES)
     private var prerollSiguiente = 0
     private var prerollUsados = 0
 
     private var vozActiva = false
+    private var modoEscuchandoComando = false
     private var cerrado = false
 
-    init {
-        Log.d(TAG, "Motor listo. Palabra clave: «${this.palabraClave}»")
-    }
-
-    // @Synchronized: procesar() corre en el hilo de audio y close() en el principal;
-    // así nunca se libera la memoria nativa mientras Vosk la está usando.
     @Synchronized
     override fun procesar(muestras: ShortArray, cantidad: Int, hayVoz: Boolean): Boolean {
         if (cerrado) return false
         var detectada = false
 
-        if (hayVoz) {
-            if (!vozActiva) {
-                // Empieza una frase: primero el audio previo guardado (del más viejo al más nuevo)
-                vozActiva = true
-                val inicio = (prerollSiguiente - prerollUsados + PREROLL_FRAMES) % PREROLL_FRAMES
-                for (i in 0 until prerollUsados) {
-                    val indice = (inicio + i) % PREROLL_FRAMES
-                    if (alimentar(preroll[indice], prerollLargo[indice])) detectada = true
+        if (modoEscuchandoComando) {
+            // Escuchando y transcribiendo el comando dictado tras el wake word
+            if (hayVoz) {
+                recognizerCommand.acceptWaveForm(muestras, cantidad)
+            } else {
+                // Silencio: el usuario terminó de hablar, obtenemos el texto final del comando
+                modoEscuchandoComando = false
+                val json = recognizerCommand.finalResult
+                val textoTranscrito = extraerTextoJson(json)
+                if (textoTranscrito.isNotBlank()) {
+                    ultimo = textoTranscrito
+                    detectada = true
                 }
-                prerollUsados = 0
+                recognizerCommand.reset()
+                recognizerWake.reset()
             }
-            if (alimentar(muestras, cantidad)) detectada = true
         } else {
-            if (vozActiva) {
-                // La frase terminó: pedir el resultado final de lo que Vosk aún tenga pendiente
-                vozActiva = false
-                if (evaluar(recognizer.getFinalResult())) detectada = true
-                recognizer.reset()
+            // Esperando la palabra clave
+            if (hayVoz) {
+                if (!vozActiva) {
+                    vozActiva = true
+                    val inicio = (prerollSiguiente - prerollUsados + PREROLL_FRAMES) % PREROLL_FRAMES
+                    for (i in 0 until prerollUsados) {
+                        val indice = (inicio + i) % PREROLL_FRAMES
+                        if (alimentarWake(preroll[indice], prerollLargo[indice])) {
+                            activarModoComando(muestras, cantidad)
+                            return false
+                        }
+                    }
+                    prerollUsados = 0
+                }
+                if (alimentarWake(muestras, cantidad)) {
+                    activarModoComando(muestras, cantidad)
+                    return false
+                }
+            } else {
+                if (vozActiva) {
+                    vozActiva = false
+                    evaluarWake(recognizerWake.getFinalResult())
+                    recognizerWake.reset()
+                }
+                guardarEnPreroll(muestras, cantidad)
             }
-            guardarEnPreroll(muestras, cantidad)
         }
         return detectada
     }
 
-    /** Entrega audio a Vosk. Si Vosk cierra una frase por su cuenta, evalúa el resultado. */
-    private fun alimentar(muestras: ShortArray, cantidad: Int): Boolean =
-        if (recognizer.acceptWaveForm(muestras, cantidad)) {
-            evaluar(recognizer.getResult())
+    private fun alimentarWake(muestras: ShortArray, cantidad: Int): Boolean =
+        if (recognizerWake.acceptWaveForm(muestras, cantidad)) {
+            evaluarWake(recognizerWake.getResult())
         } else {
             false
         }
+
+    private fun activarModoComando(muestras: ShortArray, cantidad: Int) {
+        Log.d(TAG, "¡Palabra clave detectada! Cambiando a transcripción de comando...")
+        modoEscuchandoComando = true
+        vozActiva = false
+        // Alimentar el audio actual al reconocedor de comandos
+        recognizerCommand.acceptWaveForm(muestras, cantidad)
+    }
 
     private fun guardarEnPreroll(muestras: ShortArray, cantidad: Int) {
         val largo = minOf(cantidad, AudioRecorder.FRAME_SIZE)
@@ -134,30 +133,15 @@ class VoskWakeWord(
         if (prerollUsados < PREROLL_FRAMES) prerollUsados++
     }
 
-    /**
-     * Lee el JSON de Vosk y decide si contiene la palabra clave con confianza suficiente.
-     * Ejemplo de JSON:
-     *   {"result":[{"conf":1.0,"end":1.2,"start":0.6,"word":"asistente"}],"text":"asistente"}
-     */
-    private fun evaluar(json: String): Boolean {
-        val objeto = try {
-            JSONObject(json)
-        } catch (e: JSONException) {
-            return false
-        }
-
-        val texto = objeto.optString("text", "").trim()
+    private fun evaluarWake(json: String): Boolean {
+        val texto = extraerTextoJson(json)
         if (texto.isEmpty()) return false
         ultimo = texto
-
-        // ¿La palabra (o frase) aparece completa? Se rodea de espacios para no confundir
-        // "asistente" con "asistentes".
         if (!" $texto ".contains(" $palabraClave ")) return false
 
-        // Confianza: la más baja entre las palabras que forman la palabra clave
         val partes = palabraClave.split(" ")
         var confianza = 1.0
-        val palabras = objeto.optJSONArray("result")
+        val palabras = try { JSONObject(json).optJSONArray("result") } catch (_: Exception) { null }
         if (palabras != null) {
             for (i in 0 until palabras.length()) {
                 val p = palabras.optJSONObject(i) ?: continue
@@ -166,11 +150,13 @@ class VoskWakeWord(
                 }
             }
         }
+        return confianza >= confianzaMinima
+    }
 
-        val aceptada = confianza >= confianzaMinima
-        Log.d(TAG, "«$texto» confianza=${"%.2f".format(confianza)} -> " +
-                if (aceptada) "ACEPTADA" else "rechazada")
-        return aceptada
+    private fun extraerTextoJson(json: String): String = try {
+        JSONObject(json).optString("text", "").trim()
+    } catch (e: JSONException) {
+        ""
     }
 
     @Synchronized
@@ -178,7 +164,8 @@ class VoskWakeWord(
         if (cerrado) return
         cerrado = true
         try {
-            recognizer.close()
+            recognizerWake.close()
+            recognizerCommand.close()
         } finally {
             model.close()
         }
