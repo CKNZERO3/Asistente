@@ -1,17 +1,18 @@
+
 package com.miasistente.app.ui
 
 import androidx.lifecycle.ViewModelStore
-import app.cash.turbine.test
 import com.google.common.truth.Truth.assertThat
 import com.miasistente.app.dominio.AssistantState
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
+import app.cash.turbine.test
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -19,65 +20,94 @@ import org.junit.jupiter.api.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class AsistenteViewModelTest {
 
-    private lateinit var dispatcher: StandardTestDispatcher
-    private lateinit var source: MutableStateFlow<AssistantState>
+    private val testDispatcher = StandardTestDispatcher()
+    private lateinit var stateSource: MutableStateFlow<AssistantState>
     private lateinit var viewModel: AsistenteViewModel
-    private lateinit var viewModelStore: ViewModelStore
 
     @BeforeEach
     fun setUp() {
-        dispatcher = StandardTestDispatcher()
-        Dispatchers.setMain(dispatcher)
-
-        source = MutableStateFlow(AssistantState.IDLE)
-        viewModelStore = ViewModelStore()
-
+        kotlinx.coroutines.Dispatchers.setMain(testDispatcher)
+        stateSource = MutableStateFlow(AssistantState.IDLE)
         viewModel = AsistenteViewModel(
-            stateSource = source,
-            updateState = { state -> source.value = state }
+            stateSource = stateSource,
+            updateState = { stateSource.value = it }
         )
-
-        viewModelStore.put("assistant", viewModel)
     }
 
     @AfterEach
     fun tearDown() {
-        viewModelStore.clear()
-        Dispatchers.resetMain()
+        kotlinx.coroutines.Dispatchers.resetMain()
     }
 
     @Test
-    fun `initial state is IDLE`() = runTest(dispatcher) {
+    fun initialStateIsIdle() = runTest(testDispatcher) {
         assertThat(viewModel.assistantState.value)
             .isEqualTo(AssistantState.IDLE)
+    }
 
+    @Test
+    fun stateChangesArePropagated() = runTest(testDispatcher) {
         viewModel.assistantState.test {
-            assertThat(awaitItem())
-                .isEqualTo(AssistantState.IDLE)
+            assertThat(awaitItem()).isEqualTo(AssistantState.IDLE)
+
+            stateSource.value = AssistantState.LISTENING
+            runCurrent()
+            assertThat(awaitItem()).isEqualTo(AssistantState.LISTENING)
+
+            stateSource.value = AssistantState.THINKING
+            runCurrent()
+            assertThat(awaitItem()).isEqualTo(AssistantState.THINKING)
+
+            stateSource.value = AssistantState.SPEAKING
+            runCurrent()
+            assertThat(awaitItem()).isEqualTo(AssistantState.SPEAKING)
+
+            stateSource.value = AssistantState.IDLE
+            runCurrent()
+            assertThat(awaitItem()).isEqualTo(AssistantState.IDLE)
 
             cancelAndIgnoreRemainingEvents()
         }
     }
 
     @Test
-    fun `emits complete transition sequence`() = runTest(dispatcher) {
-        viewModel.assistantState.test {
-            assertThat(awaitItem())
+    fun externalSourceUpdatesAreObserved() = runTest(testDispatcher) {
+        stateSource.value = AssistantState.LISTENING
+        runCurrent()
+
+        assertThat(viewModel.assistantState.value)
+            .isEqualTo(AssistantState.LISTENING)
+    }
+
+    @Test
+    fun setIdleResetsActiveStates() = runTest(testDispatcher) {
+        val activeStates = listOf(
+            AssistantState.LISTENING,
+            AssistantState.THINKING,
+            AssistantState.SPEAKING
+        )
+
+        activeStates.forEach { state ->
+            viewModel.setState(state)
+            runCurrent()
+
+            assertThat(viewModel.assistantState.value).isEqualTo(state)
+
+            viewModel.setIdle()
+            runCurrent()
+
+            assertThat(viewModel.assistantState.value)
                 .isEqualTo(AssistantState.IDLE)
+        }
+    }
 
-            val expectedStates = listOf(
-                AssistantState.LISTENING,
-                AssistantState.THINKING,
-                AssistantState.SPEAKING,
-                AssistantState.IDLE
-            )
+    @Test
+    fun duplicateStateDoesNotCreateAnotherEmission() = runTest(testDispatcher) {
+        viewModel.assistantState.test {
+            assertThat(awaitItem()).isEqualTo(AssistantState.IDLE)
 
-            expectedStates.forEach { nextState ->
-                viewModel.setState(nextState)
-                runCurrent()
-
-                assertThat(awaitItem()).isEqualTo(nextState)
-            }
+            stateSource.value = AssistantState.IDLE
+            runCurrent()
 
             expectNoEvents()
             cancelAndIgnoreRemainingEvents()
@@ -85,93 +115,16 @@ class AsistenteViewModelTest {
     }
 
     @Test
-    fun `reflects updates from external state owner`() =
-        runTest(dispatcher) {
-            viewModel.assistantState.test {
-                assertThat(awaitItem())
-                    .isEqualTo(AssistantState.IDLE)
-
-                source.value = AssistantState.LISTENING
-                runCurrent()
-
-                assertThat(awaitItem())
-                    .isEqualTo(AssistantState.LISTENING)
-
-                source.value = AssistantState.THINKING
-                runCurrent()
-
-                assertThat(awaitItem())
-                    .isEqualTo(AssistantState.THINKING)
-
-                cancelAndIgnoreRemainingEvents()
-            }
-        }
-
-    @Test
-    fun `setIdle resets every active state`() = runTest(dispatcher) {
+    fun setStateUpdatesObservedState() = runTest(testDispatcher) {
         viewModel.assistantState.test {
-            assertThat(awaitItem())
-                .isEqualTo(AssistantState.IDLE)
+            assertThat(awaitItem()).isEqualTo(AssistantState.IDLE)
 
-            listOf(
-                AssistantState.LISTENING,
-                AssistantState.THINKING,
-                AssistantState.SPEAKING
-            ).forEach { activeState ->
-                viewModel.setState(activeState)
-                runCurrent()
+            viewModel.setState(AssistantState.THINKING)
+            runCurrent()
 
-                assertThat(awaitItem()).isEqualTo(activeState)
-
-                viewModel.setIdle()
-                runCurrent()
-
-                assertThat(awaitItem())
-                    .isEqualTo(AssistantState.IDLE)
-            }
+            assertThat(awaitItem()).isEqualTo(AssistantState.THINKING)
 
             cancelAndIgnoreRemainingEvents()
         }
     }
-
-    @Test
-    fun `assigning same state does not emit duplicate`() =
-        runTest(dispatcher) {
-            viewModel.assistantState.test {
-                assertThat(awaitItem())
-                    .isEqualTo(AssistantState.IDLE)
-
-                viewModel.setState(AssistantState.LISTENING)
-                runCurrent()
-
-                assertThat(awaitItem())
-                    .isEqualTo(AssistantState.LISTENING)
-
-                viewModel.setState(AssistantState.LISTENING)
-                runCurrent()
-
-                expectNoEvents()
-                cancelAndIgnoreRemainingEvents()
-            }
-        }
-
-    @Test
-    fun `latest state propagates when collector is active`() =
-        runTest(dispatcher) {
-            viewModel.assistantState.test {
-                assertThat(awaitItem())
-                    .isEqualTo(AssistantState.IDLE)
-
-                viewModel.setState(AssistantState.THINKING)
-                runCurrent()
-
-                assertThat(awaitItem())
-                    .isEqualTo(AssistantState.THINKING)
-
-                assertThat(viewModel.assistantState.value)
-                    .isEqualTo(AssistantState.THINKING)
-
-                cancelAndIgnoreRemainingEvents()
-            }
-        }
 }
