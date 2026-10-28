@@ -1,12 +1,20 @@
+
 package com.miasistente.app.ui.avatar
 
-import androidx.compose.animation.core.*
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -21,54 +29,54 @@ fun AssistantAvatarView(
     modifier: Modifier = Modifier,
     baseColor: Color = Color(0xFF3F51B5)
 ) {
-    val infiniteTransition = rememberInfiniteTransition(label = "AssistantInfiniteTransition")
+    val transition = rememberInfiniteTransition(
+        label = "AssistantAvatarTransition"
+    )
 
-    val listeningScale by infiniteTransition.animateFloat(
-        initialValue = 1.0f,
+    val listeningScale by transition.animateFloat(
+        initialValue = 1f,
         targetValue = 1.2f,
         animationSpec = infiniteRepeatable(
-            animation = tween(600, easing = FastOutSlowInEasing),
+            animation = tween(
+                durationMillis = 600,
+                easing = FastOutSlowInEasing
+            ),
             repeatMode = RepeatMode.Reverse
         ),
         label = "ListeningScale"
     )
 
-    val thinkingScale by infiniteTransition.animateFloat(
-        initialValue = 1.0f,
+    val thinkingScale by transition.animateFloat(
+        initialValue = 1f,
         targetValue = 1.1f,
         animationSpec = infiniteRepeatable(
-            animation = tween(400, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
+            animation = tween(
+                durationMillis = 400,
+                easing = LinearEasing
+            ),
+            repeatMode = RepeatMode.Reverse
         ),
         label = "ThinkingScale"
     )
 
-    val speakingScale by infiniteTransition.animateFloat(
-        initialValue = 1.0f,
+    val speakingScale by transition.animateFloat(
+        initialValue = 1f,
         targetValue = 1.3f,
         animationSpec = infiniteRepeatable(
-            animation = tween(200, easing = FastOutSlowInEasing),
+            animation = tween(
+                durationMillis = 200,
+                easing = FastOutSlowInEasing
+            ),
             repeatMode = RepeatMode.Reverse
         ),
         label = "SpeakingScale"
     )
 
-    val rotationAngle by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1200, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "ThinkingRotation"
-    )
-
     val pulseScale = when (currentState) {
-        AssistantState.IDLE -> 1.0f
+        AssistantState.IDLE -> 1f
         AssistantState.LISTENING -> listeningScale
         AssistantState.THINKING -> thinkingScale
         AssistantState.SPEAKING -> speakingScale
-        else -> 1.0f // Bloque else explícito para garantizar exhaustividad
     }
 
     Box(
@@ -79,19 +87,17 @@ fun AssistantAvatarView(
         contentAlignment = Alignment.Center
     ) {
         Canvas(modifier = Modifier.size(80.dp)) {
-            val radius = (size.minDimension / 2) * (pulseScale * 0.8f)
-            
-            // Anillo reactivo exterior
+            val radius = (size.minDimension / 2f) * pulseScale * 0.8f
+
             drawCircle(
                 color = baseColor.copy(alpha = 0.5f),
                 radius = radius,
                 style = Stroke(width = 4.dp.toPx())
             )
-            
-            // Círculo central
+
             drawCircle(
                 color = baseColor,
-                radius = size.minDimension / 3
+                radius = size.minDimension / 3f
             )
         }
     }
