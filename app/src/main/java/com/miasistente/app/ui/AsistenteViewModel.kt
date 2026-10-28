@@ -8,22 +8,25 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 
-/**
- * ViewModel managing the runtime state of the hybrid voice assistant.
- * Exposes a reactive StateFlow backed by AssistantState synchronized with AsistenteService.
- */
-class AsistenteViewModel : ViewModel() {
+class AsistenteViewModel(
+    private val stateSource: StateFlow<AssistantState> =
+        AsistenteService.assistantState,
+    private val updateState: (AssistantState) -> Unit =
+        AsistenteService::updateAssistantState
+) : ViewModel() {
 
-    val assistantState: StateFlow<AssistantState> = AsistenteService.assistantState
-        .stateIn(
+    val assistantState: StateFlow<AssistantState> =
+        stateSource.stateIn(
             scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = AssistantState.IDLE
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = stateSource.value
         )
 
+    fun setState(state: AssistantState) {
+        updateState(state)
+    }
+
     fun setIdle() {
-        AsistenteService.assistantState.value.let { 
-            // Optional direct manual control hook if needed
-        }
+        setState(AssistantState.IDLE)
     }
 }
