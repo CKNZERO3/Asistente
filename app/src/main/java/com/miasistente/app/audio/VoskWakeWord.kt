@@ -13,12 +13,12 @@ import org.vosk.Recognizer
 class VoskWakeWord(
     rutaModelo: String,
     palabraClave: String,
-    private val confianzaMinima: Float = 0.6f
+    private val confianzaMinima: Float = 0.5f
 ) : WakeWordEngine {
 
     private companion object {
         const val TAG = "VoskWakeWord"
-        const val PREROLL_FRAMES = 10
+        const val PREROLL_FRAMES = 12
     }
 
     override val palabraClave: String = Ajustes.normalizar(palabraClave)
@@ -35,7 +35,6 @@ class VoskWakeWord(
 
     private val model: Model = Model(rutaModelo)
 
-    // Recognizer con gramática estricta para la palabra clave
     private val recognizerWake: Recognizer = try {
         val gramatica = JSONArray().put(this.palabraClave).put("[unk]").toString()
         Recognizer(model, AudioRecorder.SAMPLE_RATE.toFloat(), gramatica).also {
@@ -46,7 +45,6 @@ class VoskWakeWord(
         throw e
     }
 
-    // Recognizer de vocabulario libre para transcribir el comando completo tras la activación
     private val recognizerCommand: Recognizer = Recognizer(model, AudioRecorder.SAMPLE_RATE.toFloat())
 
     private val preroll = Array(PREROLL_FRAMES) { ShortArray(AudioRecorder.FRAME_SIZE) }
@@ -64,11 +62,9 @@ class VoskWakeWord(
         var detectada = false
 
         if (modoEscuchandoComando) {
-            // Escuchando y transcribiendo el comando dictado tras el wake word
             if (hayVoz) {
                 recognizerCommand.acceptWaveForm(muestras, cantidad)
             } else {
-                // Silencio: el usuario terminó de hablar, obtenemos el texto final del comando
                 modoEscuchandoComando = false
                 val json = recognizerCommand.finalResult
                 val textoTranscrito = extraerTextoJson(json)
@@ -80,7 +76,6 @@ class VoskWakeWord(
                 recognizerWake.reset()
             }
         } else {
-            // Esperando la palabra clave
             if (hayVoz) {
                 if (!vozActiva) {
                     vozActiva = true
@@ -118,10 +113,9 @@ class VoskWakeWord(
         }
 
     private fun activarModoComando(muestras: ShortArray, cantidad: Int) {
-        Log.d(TAG, "¡Palabra clave detectada! Cambiando a transcripción de comando...")
+        Log.d(TAG, "¡Palabra clave detectada! Cambiando a transcripción libre...")
         modoEscuchandoComando = true
         vozActiva = false
-        // Alimentar el audio actual al reconocedor de comandos
         recognizerCommand.acceptWaveForm(muestras, cantidad)
     }
 
