@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import com.miasistente.app.BuildConfig
 
 /**
  * Guarda datos sensibles (por ahora, la API Key de Gemini) cifrados en el teléfono.
@@ -23,6 +24,13 @@ class SecureStorage(context: Context) {
 
     // "lazy": se crea la primera vez que se usa, no al instanciar la clase
     private val prefs: SharedPreferences by lazy { crearPrefs() }
+
+    init {
+        // Zero-configuration fallback: auto-injects if defined in local.properties / BuildConfig
+        if (!tieneApiKey() && BuildConfig.GEMINI_API_KEY.isNotBlank()) {
+            guardarApiKey(BuildConfig.GEMINI_API_KEY)
+        }
+    }
 
     /** Guarda la API Key (se eliminan espacios al inicio y al final). */
     fun guardarApiKey(clave: String) {
