@@ -1,4 +1,3 @@
-
 package com.miasistente.app.ui
 
 import android.Manifest
@@ -49,7 +48,6 @@ data class ChatMessage(
 
 private fun permisosParaServicio(): List<String> = buildList {
     add(Manifest.permission.RECORD_AUDIO)
-
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         add(Manifest.permission.POST_NOTIFICATIONS)
     }
@@ -81,6 +79,14 @@ fun PantallaPrincipal() {
         )
     }
 
+    // Escuchar eventos de voz transcritos para añadirlos al Chat
+    LaunchedEffect(Unit) {
+        AsistenteService.eventosComando.collect { evento ->
+            chatMessages = chatMessages + ChatMessage(text = evento.comandoUsuario, isUser = true)
+            chatMessages = chatMessages + ChatMessage(text = evento.respuesta, isUser = false)
+        }
+    }
+
     var inputText by remember { mutableStateOf("") }
     var isSending by remember { mutableStateOf(false) }
 
@@ -94,17 +100,12 @@ fun PantallaPrincipal() {
         }
     }
 
-    var microfonoOk by remember {
-        mutableStateOf(Permisos.microfono(context))
-    }
-    var superposicionOk by remember {
-        mutableStateOf(Permisos.superposicion(context))
-    }
+    var microfonoOk by remember { mutableStateOf(Permisos.microfono(context)) }
+    var superposicionOk by remember { mutableStateOf(Permisos.superposicion(context)) }
     var microfonoDenegado by remember { mutableStateOf(false) }
     var iniciarTrasPermisos by remember { mutableStateOf(false) }
     var mensaje by remember { mutableStateOf<String?>(null) }
 
-    // Actualizar los permisos al regresar desde Ajustes del sistema.
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         microfonoOk = Permisos.microfono(context)
         superposicionOk = Permisos.superposicion(context)
@@ -114,14 +115,10 @@ fun PantallaPrincipal() {
         ActivityResultContracts.RequestMultiplePermissions()
     ) {
         microfonoOk = Permisos.microfono(context)
-
-        if (!microfonoOk) {
-            microfonoDenegado = true
-        }
+        if (!microfonoOk) microfonoDenegado = true
 
         if (iniciarTrasPermisos) {
             iniciarTrasPermisos = false
-
             if (microfonoOk) {
                 mensaje = null
                 AsistenteService.start(context)
@@ -131,13 +128,10 @@ fun PantallaPrincipal() {
         }
     }
 
-    var palabraEscrita by remember {
-        mutableStateOf(ajustes.palabraClave)
-    }
+    var palabraEscrita by remember { mutableStateOf(ajustes.palabraClave) }
 
     fun activarServicio() {
         val normalizada = Ajustes.normalizar(palabraEscrita)
-
         if (normalizada.isEmpty()) {
             mensaje = "Escribe una palabra clave (solo letras)."
             return
@@ -147,10 +141,7 @@ fun PantallaPrincipal() {
         palabraEscrita = normalizada
 
         val faltantes = permisosParaServicio().filter {
-            ContextCompat.checkSelfPermission(
-                context,
-                it
-            ) != PackageManager.PERMISSION_GRANTED
+            ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED
         }
 
         if (faltantes.isEmpty()) {
@@ -163,9 +154,7 @@ fun PantallaPrincipal() {
     }
 
     var avatar by remember { mutableStateOf(ajustes.avatar) }
-    var imagenPersonalizada by remember {
-        mutableStateOf<ImageBitmap?>(null)
-    }
+    var imagenPersonalizada by remember { mutableStateOf<ImageBitmap?>(null) }
     var mensajeAvatar by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
@@ -192,9 +181,7 @@ fun PantallaPrincipal() {
     var tieneClave by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
-        tieneClave = withContext(Dispatchers.IO) {
-            almacen.tieneApiKey()
-        }
+        tieneClave = withContext(Dispatchers.IO) { almacen.tieneApiKey() }
     }
 
     var overlayActivo by remember { mutableStateOf(false) }
@@ -230,14 +217,9 @@ fun PantallaPrincipal() {
 
                         FilledTonalButton(
                             onClick = {
-                                // Verificar el permiso real cada vez que se pulsa.
-                                superposicionOk =
-                                    Permisos.superposicion(context)
-
+                                superposicionOk = Permisos.superposicion(context)
                                 if (!superposicionOk) {
-                                    context.startActivity(
-                                        Permisos.intentSuperposicion(context)
-                                    )
+                                    context.startActivity(Permisos.intentSuperposicion(context))
                                 } else if (overlayActivo) {
                                     OverlayAvatarService.stop(context)
                                     overlayActivo = false
@@ -247,13 +229,7 @@ fun PantallaPrincipal() {
                                 }
                             }
                         ) {
-                            Text(
-                                if (overlayActivo) {
-                                    "🪟 Ocultar Flotante"
-                                } else {
-                                    "🪟 Avatar Flotante"
-                                }
-                            )
+                            Text(if (overlayActivo) "🪟 Ocultar Flotante" else "🪟 Avatar Flotante")
                         }
                     }
                 }
@@ -269,13 +245,11 @@ fun PantallaPrincipal() {
                     onClick = { selectedTab = 0 },
                     text = { Text("💬 Chat") }
                 )
-
                 Tab(
                     selected = selectedTab == 1,
                     onClick = { selectedTab = 1 },
                     text = { Text("📝 Notas") }
                 )
-
                 Tab(
                     selected = selectedTab == 2,
                     onClick = { selectedTab = 2 },
@@ -296,22 +270,15 @@ fun PantallaPrincipal() {
                         onInputChanged = { inputText = it },
                         isSending = isSending,
                         onSend = { query ->
-                            if (query.isBlank() || isSending) {
-                                return@ChatTabContent
-                            }
+                            if (query.isBlank() || isSending) return@ChatTabContent
 
-                            chatMessages = chatMessages + ChatMessage(
-                                text = query,
-                                isUser = true
-                            )
-
+                            chatMessages = chatMessages + ChatMessage(text = query, isUser = true)
                             inputText = ""
                             isSending = true
 
                             scope.launch {
                                 try {
                                     val resultado = procesador.procesar(query)
-
                                     chatMessages = chatMessages + ChatMessage(
                                         text = resultado.mensaje,
                                         isUser = false
@@ -344,32 +311,22 @@ fun PantallaPrincipal() {
                         onActivarServicio = { activarServicio() },
                         onPedirMicrofono = {
                             if (microfonoDenegado) {
-                                context.startActivity(
-                                    Permisos.intentAjustesApp(context)
-                                )
+                                context.startActivity(Permisos.intentAjustesApp(context))
                             } else {
-                                lanzadorPermisos.launch(
-                                    arrayOf(Manifest.permission.RECORD_AUDIO)
-                                )
+                                lanzadorPermisos.launch(arrayOf(Manifest.permission.RECORD_AUDIO))
                             }
                         },
                         onPedirSuperposicion = {
-                            context.startActivity(
-                                Permisos.intentSuperposicion(context)
-                            )
+                            context.startActivity(Permisos.intentSuperposicion(context))
                         },
                         onSeleccionarAvatar = {
                             avatar = it
                             ajustes.avatar = it
                         },
-                        onElegirGaleria = {
-                            lanzadorGaleria.launch("image/*")
-                        },
+                        onElegirGaleria = { lanzadorGaleria.launch("image/*") },
                         onGuardarClave = { clave ->
                             scope.launch {
-                                withContext(Dispatchers.IO) {
-                                    almacen.guardarApiKey(clave)
-                                }
+                                withContext(Dispatchers.IO) { almacen.guardarApiKey(clave) }
                                 tieneClave = true
                             }
                         },
@@ -377,7 +334,6 @@ fun PantallaPrincipal() {
                             scope.launch {
                                 try {
                                     val res = procesador.procesar(texto)
-
                                     chatMessages = chatMessages + ChatMessage(
                                         text = "Prueba [$texto]: ${res.mensaje}",
                                         isUser = false
@@ -428,9 +384,7 @@ fun ChatTabContent(
             OutlinedTextField(
                 value = inputText,
                 onValueChange = onInputChanged,
-                placeholder = {
-                    Text("Escribe un mensaje o comando...")
-                },
+                placeholder = { Text("Escribe un mensaje o comando...") },
                 modifier = Modifier.weight(1f),
                 singleLine = true
             )
@@ -449,14 +403,9 @@ fun ChatTabContent(
 
 @Composable
 fun ChatBubble(message: ChatMessage) {
-    val alignment =
-        if (message.isUser) Alignment.End else Alignment.Start
-
-    val backgroundColor =
-        if (message.isUser) Paleta.Primario else Paleta.TarjetaAlta
-
-    val textColor =
-        if (message.isUser) Paleta.SobrePrimario else Paleta.Texto
+    val alignment = if (message.isUser) Alignment.End else Alignment.Start
+    val backgroundColor = if (message.isUser) Paleta.Primario else Paleta.TarjetaAlta
+    val textColor = if (message.isUser) Paleta.SobrePrimario else Paleta.Texto
 
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -567,9 +516,7 @@ fun ControlsTabContent(
                 value = palabraEscrita,
                 onValueChange = onPalabraChanged,
                 enabled = !activo,
-                label = {
-                    Text("Palabra o frase de activación")
-                },
+                label = { Text("Palabra o frase de activación") },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth()
             )
