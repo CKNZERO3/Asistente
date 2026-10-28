@@ -20,11 +20,6 @@ android {
         ndk {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a")
         }
-        testOptions {
-        unitTests.all {
-        it.useJUnitPlatform()
-            }
-        }
     }
 
     buildTypes {
@@ -33,6 +28,12 @@ android {
         }
     }
 
+    testOptions {
+    unitTests.all {
+        it.useJUnitPlatform()
+        }
+    }
+    
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -73,8 +74,6 @@ dependencies {
     testImplementation("org.junit.jupiter:junit-jupiter-api:5.11.3")
     testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:5.11.3")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher:1.11.3")
-    testImplementation("app.cash.turbine:turbine:1.2.0")
-    testImplementation("com.google.truth:truth:1.4.4")
 
     // Coroutine testing
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
@@ -82,4 +81,4 @@ dependencies {
     // Flow testing and assertions
     testImplementation("app.cash.turbine:turbine:1.2.0")
     testImplementation("com.google.truth:truth:1.4.4")
-}
+    }
