@@ -19,25 +19,10 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.miasistente.app.dominio.AssistantState
-import com.miasistente.app.service.AsistenteService
 
 @Composable
 fun AssistantAvatarView(
-    modifier: Modifier = Modifier
-) {
-    // 👈 Corrección: Usar collectAsStateWithLifecycle() en lugar de collectAsStateCompat()
-    val currentState by AsistenteService.assistantState.collectAsStateWithLifecycle()
-
-    AssistantAvatarCanvas(
-        currentState = currentState,
-        modifier = modifier
-    )
-}
-
-@Composable
-private fun AssistantAvatarCanvas(
     currentState: AssistantState,
     modifier: Modifier = Modifier
 ) {
@@ -49,7 +34,10 @@ private fun AssistantAvatarCanvas(
         initialValue = 0.94f,
         targetValue = 1.06f,
         animationSpec = infiniteRepeatable(
-            animation = tween(2400, easing = FastOutSlowInEasing),
+            animation = tween(
+                durationMillis = 2400,
+                easing = FastOutSlowInEasing
+            ),
             repeatMode = RepeatMode.Reverse
         ),
         label = "breathing"
@@ -59,7 +47,10 @@ private fun AssistantAvatarCanvas(
         initialValue = 0.92f,
         targetValue = 1.04f,
         animationSpec = infiniteRepeatable(
-            animation = tween(3000, easing = FastOutSlowInEasing),
+            animation = tween(
+                durationMillis = 3000,
+                easing = FastOutSlowInEasing
+            ),
             repeatMode = RepeatMode.Reverse
         ),
         label = "idle_pulse"
@@ -69,7 +60,10 @@ private fun AssistantAvatarCanvas(
         initialValue = 0.90f,
         targetValue = 1.16f,
         animationSpec = infiniteRepeatable(
-            animation = tween(700, easing = FastOutSlowInEasing),
+            animation = tween(
+                durationMillis = 700,
+                easing = FastOutSlowInEasing
+            ),
             repeatMode = RepeatMode.Reverse
         ),
         label = "listening_pulse"
@@ -79,7 +73,10 @@ private fun AssistantAvatarCanvas(
         initialValue = 0.96f,
         targetValue = 1.08f,
         animationSpec = infiniteRepeatable(
-            animation = tween(1100, easing = FastOutSlowInEasing),
+            animation = tween(
+                durationMillis = 1100,
+                easing = FastOutSlowInEasing
+            ),
             repeatMode = RepeatMode.Reverse
         ),
         label = "thinking_pulse"
@@ -89,7 +86,10 @@ private fun AssistantAvatarCanvas(
         initialValue = 0.88f,
         targetValue = 1.20f,
         animationSpec = infiniteRepeatable(
-            animation = tween(420, easing = FastOutSlowInEasing),
+            animation = tween(
+                durationMillis = 420,
+                easing = FastOutSlowInEasing
+            ),
             repeatMode = RepeatMode.Reverse
         ),
         label = "speaking_pulse"
@@ -104,7 +104,10 @@ private fun AssistantAvatarCanvas(
 
     val scale by animateFloatAsState(
         targetValue = targetScale,
-        animationSpec = tween(280, easing = FastOutSlowInEasing),
+        animationSpec = tween(
+            durationMillis = 280,
+            easing = FastOutSlowInEasing
+        ),
         label = "state_scale"
     )
 
@@ -119,14 +122,25 @@ private fun AssistantAvatarCanvas(
         modifier = modifier.size(112.dp),
         contentAlignment = Alignment.Center
     ) {
-        Canvas(modifier = Modifier.size(104.dp)) {
-            val center = Offset(size.width / 2f, size.height / 2f)
+        Canvas(
+            modifier = Modifier.size(104.dp)
+        ) {
+            val center = Offset(
+                x = size.width / 2f,
+                y = size.height / 2f
+            )
+
             val baseRadius = size.minDimension * 0.23f
             val radius = baseRadius * scale * breathing
 
+            // Halo exterior.
             drawCircle(
                 brush = Brush.radialGradient(
-                    colors = listOf(glowColor.copy(alpha = 0.30f), glowColor.copy(alpha = 0.10f), Color.Transparent),
+                    colors = listOf(
+                        glowColor.copy(alpha = 0.30f),
+                        glowColor.copy(alpha = 0.10f),
+                        Color.Transparent
+                    ),
                     center = center,
                     radius = radius * 2.8f
                 ),
@@ -134,27 +148,42 @@ private fun AssistantAvatarCanvas(
                 center = center
             )
 
+            // Anillo de energía.
             drawCircle(
                 color = glowColor.copy(alpha = 0.48f),
                 radius = radius * 1.65f,
                 center = center,
-                style = Stroke(width = 1.5.dp.toPx())
+                style = Stroke(
+                    width = 1.5.dp.toPx()
+                )
             )
 
+            // Núcleo luminoso.
             drawCircle(
                 brush = Brush.radialGradient(
-                    colors = listOf(Color.White, glowColor.copy(alpha = 0.95f), glowColor.copy(alpha = 0.65f)),
-                    center = Offset(center.x - radius * 0.22f, center.y - radius * 0.25f),
+                    colors = listOf(
+                        Color.White,
+                        glowColor.copy(alpha = 0.95f),
+                        glowColor.copy(alpha = 0.65f)
+                    ),
+                    center = Offset(
+                        x = center.x - radius * 0.22f,
+                        y = center.y - radius * 0.25f
+                    ),
                     radius = radius * 1.7f
                 ),
                 radius = radius,
                 center = center
             )
 
+            // Reflejo interior.
             drawCircle(
                 color = Color.White.copy(alpha = 0.75f),
                 radius = radius * 0.20f,
-                center = Offset(center.x - radius * 0.32f, center.y - radius * 0.35f)
+                center = Offset(
+                    x = center.x - radius * 0.32f,
+                    y = center.y - radius * 0.35f
+                )
             )
         }
     }
