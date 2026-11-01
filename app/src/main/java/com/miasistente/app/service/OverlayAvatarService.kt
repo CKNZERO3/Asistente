@@ -109,9 +109,10 @@ class OverlayAvatarService : Service(),
 
             isClickable = true
 
-            setContent {
-                val currentState by
-                    AsistenteService.assistantState.collectAsStateWithLifecycle()
+           setContent {
+                val currentState by AsistenteService.assistantState.collectAsState(
+                    initial = AsistenteService.assistantState.value
+                )
 
                 AsistenteTema {
                     AssistantAvatarView(
@@ -119,7 +120,7 @@ class OverlayAvatarService : Service(),
                     )
                 }
             }
-
+             
             setOnTouchListener(createDragListener())
         }
 
