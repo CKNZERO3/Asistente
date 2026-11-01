@@ -19,6 +19,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.miasistente.app.dominio.AssistantState
 import com.miasistente.app.service.AsistenteService
 
@@ -26,7 +27,8 @@ import com.miasistente.app.service.AsistenteService
 fun AssistantAvatarView(
     modifier: Modifier = Modifier
 ) {
-    val currentState by AsistenteService.assistantState.collectAsStateCompat()
+    // 👈 Corrección: Usar collectAsStateWithLifecycle() en lugar de collectAsStateCompat()
+    val currentState by AsistenteService.assistantState.collectAsStateWithLifecycle()
 
     AssistantAvatarCanvas(
         currentState = currentState,
@@ -47,10 +49,7 @@ private fun AssistantAvatarCanvas(
         initialValue = 0.94f,
         targetValue = 1.06f,
         animationSpec = infiniteRepeatable(
-            animation = tween(
-                durationMillis = 2400,
-                easing = FastOutSlowInEasing
-            ),
+            animation = tween(2400, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
         ),
         label = "breathing"
@@ -105,10 +104,7 @@ private fun AssistantAvatarCanvas(
 
     val scale by animateFloatAsState(
         targetValue = targetScale,
-        animationSpec = tween(
-            durationMillis = 280,
-            easing = FastOutSlowInEasing
-        ),
+        animationSpec = tween(280, easing = FastOutSlowInEasing),
         label = "state_scale"
     )
 
@@ -128,14 +124,9 @@ private fun AssistantAvatarCanvas(
             val baseRadius = size.minDimension * 0.23f
             val radius = baseRadius * scale * breathing
 
-            // Halo exterior difuminado.
             drawCircle(
                 brush = Brush.radialGradient(
-                    colors = listOf(
-                        glowColor.copy(alpha = 0.30f),
-                        glowColor.copy(alpha = 0.10f),
-                        Color.Transparent
-                    ),
+                    colors = listOf(glowColor.copy(alpha = 0.30f), glowColor.copy(alpha = 0.10f), Color.Transparent),
                     center = center,
                     radius = radius * 2.8f
                 ),
@@ -143,7 +134,6 @@ private fun AssistantAvatarCanvas(
                 center = center
             )
 
-            // Anillo de energía.
             drawCircle(
                 color = glowColor.copy(alpha = 0.48f),
                 radius = radius * 1.65f,
@@ -151,32 +141,20 @@ private fun AssistantAvatarCanvas(
                 style = Stroke(width = 1.5.dp.toPx())
             )
 
-            // Núcleo luminoso.
             drawCircle(
                 brush = Brush.radialGradient(
-                    colors = listOf(
-                        Color.White,
-                        glowColor.copy(alpha = 0.95f),
-                        glowColor.copy(alpha = 0.65f)
-                    ),
-                    center = Offset(
-                        center.x - radius * 0.22f,
-                        center.y - radius * 0.25f
-                    ),
+                    colors = listOf(Color.White, glowColor.copy(alpha = 0.95f), glowColor.copy(alpha = 0.65f)),
+                    center = Offset(center.x - radius * 0.22f, center.y - radius * 0.25f),
                     radius = radius * 1.7f
                 ),
                 radius = radius,
                 center = center
             )
 
-            // Reflejo sutil para dar sensación orgánica.
             drawCircle(
                 color = Color.White.copy(alpha = 0.75f),
                 radius = radius * 0.20f,
-                center = Offset(
-                    center.x - radius * 0.32f,
-                    center.y - radius * 0.35f
-                )
+                center = Offset(center.x - radius * 0.32f, center.y - radius * 0.35f)
             )
         }
     }
