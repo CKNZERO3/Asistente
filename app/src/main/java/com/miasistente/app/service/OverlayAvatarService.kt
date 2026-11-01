@@ -1,4 +1,3 @@
-
 package com.miasistente.app.service
 
 import android.app.Service
@@ -29,6 +28,7 @@ import androidx.savedstate.SavedStateRegistry
 import androidx.savedstate.SavedStateRegistryController
 import androidx.savedstate.SavedStateRegistryOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
+import com.miasistente.app.MainActivity
 import com.miasistente.app.ui.AsistenteTema
 import com.miasistente.app.ui.avatar.AssistantAvatarView
 import kotlin.math.abs
@@ -113,6 +113,11 @@ class OverlayAvatarService : Service(),
 
             isClickable = true
 
+            // NUEVO: acción al hacer un toque simple sobre el avatar.
+            setOnClickListener {
+                openMainActivity()
+            }
+
             setContent {
                 val currentState by
                     AsistenteService.assistantState.collectAsState(
@@ -164,6 +169,30 @@ class OverlayAvatarService : Service(),
         } catch (_: RuntimeException) {
             disposeFailedView(view)
             stopSelf()
+        }
+    }
+
+    // NUEVO: abre la pantalla principal desde el servicio.
+    private fun openMainActivity() {
+        val intent = Intent(
+            this,
+            MainActivity::class.java
+        ).apply {
+            addFlags(
+                Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                    Intent.FLAG_ACTIVITY_SINGLE_TOP
+            )
+        }
+
+        try {
+            startActivity(intent)
+        } catch (_: RuntimeException) {
+            Toast.makeText(
+                this,
+                "No se pudo abrir el asistente",
+                Toast.LENGTH_SHORT
+            ).show()
         }
     }
 
@@ -228,6 +257,7 @@ class OverlayAvatarService : Service(),
 
                 MotionEvent.ACTION_UP -> {
                     if (!isDragging) {
+                        // Activa el OnClickListener si fue un toque corto.
                         view.performClick()
                     }
 
