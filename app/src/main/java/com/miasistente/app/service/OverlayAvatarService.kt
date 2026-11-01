@@ -1,4 +1,4 @@
-ppackage com.miasistente.app.service
+package com.miasistente.app.service
 
 import android.app.Service
 import android.content.Context
