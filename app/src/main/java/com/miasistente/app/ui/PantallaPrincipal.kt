@@ -32,6 +32,8 @@ import com.miasistente.app.service.OverlayAvatarService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 
 data class ChatMessage(
     val text: String,
