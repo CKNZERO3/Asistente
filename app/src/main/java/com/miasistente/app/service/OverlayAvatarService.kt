@@ -10,6 +10,7 @@ import android.provider.Settings
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.compose.ui.platform.ComposeView
@@ -21,12 +22,14 @@ import androidx.lifecycle.ViewModelStore
 import androidx.lifecycle.ViewModelStoreOwner
 import androidx.lifecycle.setViewTreeLifecycleOwner
 import androidx.lifecycle.setViewTreeViewModelStoreOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.savedstate.SavedStateRegistry
 import androidx.savedstate.SavedStateRegistryController
 import androidx.savedstate.SavedStateRegistryOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import com.miasistente.app.ui.AsistenteTema
 import com.miasistente.app.ui.avatar.AssistantAvatarView
+import kotlin.math.abs
 
 class OverlayAvatarService : Service(),
     LifecycleOwner,
@@ -56,9 +59,12 @@ class OverlayAvatarService : Service(),
         super.onCreate()
 
         lifecycleRegistry = LifecycleRegistry(this)
-        savedStateController = SavedStateRegistryController.create(this)
-        savedStateController.performAttach()
-        savedStateController.performRestore(null)
+
+        savedStateController =
+            SavedStateRegistryController.create(this).apply {
+                performAttach()
+                performRestore(null)
+            }
 
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
 
@@ -71,7 +77,7 @@ class OverlayAvatarService : Service(),
         startId: Int
     ): Int {
         when (intent?.action) {
-            ACTION_STOP -> stopSelf()
+            ACTION_STOP -> stopSelf(startId)
             ACTION_START, null -> showOverlay()
         }
 
@@ -87,6 +93,7 @@ class OverlayAvatarService : Service(),
                 "Permiso de superposición no concedido",
                 Toast.LENGTH_SHORT
             ).show()
+
             stopSelf()
             return
         }
@@ -100,9 +107,16 @@ class OverlayAvatarService : Service(),
             setViewTreeViewModelStoreOwner(this@OverlayAvatarService)
             setViewTreeSavedStateRegistryOwner(this@OverlayAvatarService)
 
+            isClickable = true
+
             setContent {
+                val currentState by
+                    AsistenteService.assistantState.collectAsStateWithLifecycle()
+
                 AsistenteTema {
-                    AssistantAvatarView()
+                    AssistantAvatarView(
+                        currentState = currentState
+                    )
                 }
             }
 
@@ -128,55 +142,86 @@ class OverlayAvatarService : Service(),
         }
 
         try {
-            lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_START)
-            lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
-
             windowManager.addView(view, params)
 
             composeView = view
             overlayParams = params
             isViewAdded = true
-        } catch (exception: WindowManager.BadTokenException) {
-            disposeOverlayView(view)
-            stopSelf()
-        } catch (exception: SecurityException) {
-            disposeOverlayView(view)
-            stopSelf()
-        } catch (exception: IllegalStateException) {
-            disposeOverlayView(view)
+
+            lifecycleRegistry.handleLifecycleEvent(
+                Lifecycle.Event.ON_START
+            )
+            lifecycleRegistry.handleLifecycleEvent(
+                Lifecycle.Event.ON_RESUME
+            )
+        } catch (_: RuntimeException) {
+            disposeFailedView(view)
             stopSelf()
         }
     }
 
     private fun createDragListener(): View.OnTouchListener {
+        val touchSlop = ViewConfiguration.get(this).scaledTouchSlop
+
         var initialX = 0
         var initialY = 0
         var initialTouchX = 0f
         var initialTouchY = 0f
+        var isDragging = false
 
         return View.OnTouchListener { view, event ->
-            val params = overlayParams ?: return@OnTouchListener false
+            val params = overlayParams
+                ?: return@OnTouchListener false
 
-            when (event.action) {
+            when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     initialX = params.x
                     initialY = params.y
+
                     initialTouchX = event.rawX
                     initialTouchY = event.rawY
+
+                    isDragging = false
                     true
                 }
 
                 MotionEvent.ACTION_MOVE -> {
-                    params.x = initialX + (event.rawX - initialTouchX).toInt()
-                    params.y = initialY + (event.rawY - initialTouchY).toInt()
+                    val deltaX = event.rawX - initialTouchX
+                    val deltaY = event.rawY - initialTouchY
 
-                    if (isViewAdded && view.isAttachedToWindow) {
+                    if (!isDragging) {
+                        isDragging =
+                            abs(deltaX) > touchSlop ||
+                            abs(deltaY) > touchSlop
+                    }
+
+                    if (isDragging && isViewAdded && view.isAttachedToWindow) {
+                        params.x = initialX + deltaX.toInt()
+                        params.y = initialY + deltaY.toInt()
+
                         try {
                             windowManager.updateViewLayout(view, params)
                         } catch (_: IllegalArgumentException) {
                             isViewAdded = false
+                        } catch (_: IllegalStateException) {
+                            isViewAdded = false
                         }
                     }
+
+                    true
+                }
+
+                MotionEvent.ACTION_UP -> {
+                    if (!isDragging) {
+                        view.performClick()
+                    }
+
+                    isDragging = false
+                    true
+                }
+
+                MotionEvent.ACTION_CANCEL -> {
+                    isDragging = false
                     true
                 }
 
@@ -185,44 +230,70 @@ class OverlayAvatarService : Service(),
         }
     }
 
-    private fun removeOverlay() {
-        val view = composeView ?: return
-
-        if (isViewAdded) {
-            try {
-                windowManager.removeView(view)
-            } catch (_: IllegalArgumentException) {
-                // La vista ya no está adjunta a WindowManager.
-            } catch (_: IllegalStateException) {
-                // WindowManager ya no puede gestionar esta vista.
+    private fun disposeFailedView(view: ComposeView) {
+        try {
+            if (view.parent != null) {
+                windowManager.removeViewImmediate(view)
             }
+        } catch (_: RuntimeException) {
+            // La vista puede haber sido retirada por WindowManager.
+        }
+
+        view.setOnTouchListener(null)
+        view.disposeComposition()
+
+        if (composeView === view) {
+            composeView = null
+            overlayParams = null
         }
 
         isViewAdded = false
-        disposeOverlayView(view)
-
-        composeView = null
-        overlayParams = null
     }
 
-    private fun disposeOverlayView(view: ComposeView) {
-        view.setOnTouchListener(null)
-        view.disposeComposition()
+    private fun removeOverlay() {
+        val view = composeView ?: return
+
+        try {
+            if (isViewAdded) {
+                windowManager.removeViewImmediate(view)
+            }
+        } catch (_: RuntimeException) {
+            // La ventana ya puede no estar registrada.
+        } finally {
+            isViewAdded = false
+
+            view.setOnTouchListener(null)
+            view.disposeComposition()
+
+            composeView = null
+            overlayParams = null
+        }
     }
 
     override fun onDestroy() {
+        if (::lifecycleRegistry.isInitialized) {
+            if (lifecycleRegistry.currentState == Lifecycle.State.RESUMED) {
+                lifecycleRegistry.handleLifecycleEvent(
+                    Lifecycle.Event.ON_PAUSE
+                )
+            }
+
+            if (lifecycleRegistry.currentState == Lifecycle.State.STARTED) {
+                lifecycleRegistry.handleLifecycleEvent(
+                    Lifecycle.Event.ON_STOP
+                )
+            }
+        }
+
         removeOverlay()
 
-        if (lifecycleRegistry.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
-            lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_PAUSE)
-        }
-
-        if (lifecycleRegistry.currentState.isAtLeast(Lifecycle.State.STARTED)) {
-            lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_STOP)
-        }
-
-        if (lifecycleRegistry.currentState != Lifecycle.State.DESTROYED) {
-            lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_DESTROY)
+        if (
+            ::lifecycleRegistry.isInitialized &&
+            lifecycleRegistry.currentState != Lifecycle.State.DESTROYED
+        ) {
+            lifecycleRegistry.handleLifecycleEvent(
+                Lifecycle.Event.ON_DESTROY
+            )
         }
 
         overlayViewModelStore.clear()
@@ -243,25 +314,23 @@ class OverlayAvatarService : Service(),
             "com.miasistente.app.action.STOP_OVERLAY"
 
         fun start(context: Context) {
-            if (!Settings.canDrawOverlays(context)) {
-                return
-            }
+            if (!Settings.canDrawOverlays(context)) return
 
             val intent = Intent(
                 context,
                 OverlayAvatarService::class.java
             ).setAction(ACTION_START)
 
-            context.startService(intent)
+            context.applicationContext.startService(intent)
         }
 
         fun stop(context: Context) {
             val intent = Intent(
                 context,
                 OverlayAvatarService::class.java
-            ).setAction(ACTION_STOP)
+            )
 
-            context.startService(intent)
+            context.stopService(intent)
         }
     }
 }
