@@ -231,6 +231,7 @@ fun PantallaPrincipal() {
                         ) {
                             Text(if (overlayActivo) "🪟 Ocultar Flotante" else "🪟 Avatar Flotante")
                         }
+                        }
                     }
                 }
             }
