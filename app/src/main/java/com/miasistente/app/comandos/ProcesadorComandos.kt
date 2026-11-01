@@ -14,6 +14,7 @@ class ProcesadorComandos(context: Context) {
     private val almacen = SecureStorage(appContext)
     private val gemini = GeminiClient(almacen)
     private val ajustes = Ajustes(appContext)
+    private val parser = IntentParser()
 
     suspend fun procesar(texto: String): ResultadoComando {
         if (texto.isBlank()) return ResultadoComando(false, "No escuché ningún comando.")
@@ -27,9 +28,12 @@ class ProcesadorComandos(context: Context) {
             comandoTexto = comandoTexto.substring(palabraLimpia.length).trimStart(',', ' ', '.', ';')
         }
 
-        return when (val comando = InterpreteComandos.interpretar(comandoTexto)) {
-            is Comando.ConsultaIA -> consultarGemini(comando.pregunta)
-            else -> local.ejecutar(comando)
+        // Parsear usando la nueva lógica avanzada de IntentParser
+        val intencion = parser.parsear(comandoTexto)
+
+        return when (intencion) {
+            is Intencion.ConsultaIA -> consultarGemini(intencion.pregunta)
+            else -> local.ejecutar(intencion)
         }
     }
 
