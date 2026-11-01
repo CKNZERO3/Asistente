@@ -11,12 +11,12 @@ data class ResultadoVoz(
 )
 
 class VoiceDetector(
-    private val margenSobreRuidoDb: Float = 6f,        // Más sensible a tonos suaves
-    private val umbralMinimoDb: Float = -55f,          // Capta susurros o voces lejanas
-    private val framesParaIniciarVoz: Int = 2,         // Respuesta ultra rápida (~64 ms)
-    private val framesParaTerminarVoz: Int = 22,       // Pausa cómoda (~700 ms) antes de cortar
+    private val margenSobreRuidoDb: Float = 5f,        // Mayor sensibilidad a tonos naturales
+    private val umbralMinimoDb: Float = -58f,          // Capta la voz con claridad
+    private val framesParaIniciarVoz: Int = 2,         // Respuesta ultra rápida
+    private val framesParaTerminarVoz: Int = 38,       // Mayor margen de silencio (~1.2s) para no cortar dictados
     private val framesCalibracion: Int = 20,
-    private val framesMaximoVoz: Int = 937             // Hasta 30 segundos de comando continuo
+    private val framesMaximoVoz: Int = 1250            // Hasta 40 segundos de comando continuo
 ) {
 
     private companion object {
