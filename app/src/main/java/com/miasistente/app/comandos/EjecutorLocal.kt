@@ -1,3 +1,35 @@
+ package com.miasistente.app.comandos
+
+import android.app.SearchManager
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
+import android.provider.MediaStore
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+
+/** Ejecuta intenciones locales: notas mediante apps externas, apertura de apps y música. */
+class EjecutorLocal(context: Context) {
+
+    companion object {
+        const val PAQUETE_MUSICOLET = "in.krosbits.musicolet"
+    }
+
+    private val appContext = context.applicationContext
+    private val pm: PackageManager = appContext.packageManager
+
+    private class Candidata(val etiqueta: String, val intent: Intent, val puntaje: Int)
+
+    suspend fun ejecutar(intencion: Intencion): ResultadoComando = when (intencion) {
+        is Intencion.CrearNota -> crearNota(intencion.contenido)
+        is Intencion.AbrirAplicacion ->
+            withContext(Dispatchers.Default) { abrirAplicacion(intencion.nombreApp) }
+        is Intencion.ReproducirMusica -> reproducirMusica(intencion.consulta)
+        is Intencion.ConsultaIA ->
+            ResultadoComando(false, "Esta consulta necesita Gemini.")
+    }
+
     // --- Notas: delegar el guardado a una aplicación instalada ----------------------------
 
     private fun crearNota(texto: String): ResultadoComando {
