@@ -79,7 +79,6 @@ fun PantallaPrincipal() {
         )
     }
 
-    // Escuchar eventos de voz transcritos para añadirlos al Chat
     LaunchedEffect(Unit) {
         AsistenteService.eventosComando.collect { evento ->
             chatMessages = chatMessages + ChatMessage(text = evento.comandoUsuario, isUser = true)
@@ -231,7 +230,6 @@ fun PantallaPrincipal() {
                         ) {
                             Text(if (overlayActivo) "🪟 Ocultar Flotante" else "🪟 Avatar Flotante")
                         }
-                        }
                     }
                 }
             }
@@ -261,7 +259,7 @@ fun PantallaPrincipal() {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .weight(1f)
+                    .fillMaxSize()
                     .padding(16.dp)
             ) {
                 when (selectedTab) {
