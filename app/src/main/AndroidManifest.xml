@@ -23,6 +23,11 @@
     <!-- Android 11+: para poder ver si Musicolet está instalado -->
     <queries>
         <package android:name="in.krosbits.musicolet" />
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    
     </queries>
 
     <!-- Permisos de almacenamiento y archivos -->
