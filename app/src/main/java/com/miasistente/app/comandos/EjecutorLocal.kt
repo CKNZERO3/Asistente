@@ -1,40 +1,30 @@
-package com.miasistente.app.comandos
+    // --- Notas: delegar el guardado a una aplicación instalada ----------------------------
 
-import android.app.SearchManager
-import android.content.Context
-import android.content.Intent
-import android.content.pm.PackageManager
-import android.os.Build
-import android.provider.MediaStore
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+    private fun crearNota(texto: String): ResultadoComando {
+        if (texto.isBlank()) {
+            return ResultadoComando(false, "¿Qué quieres anotar?")
+        }
 
-/** Ejecuta las intenciones que no necesitan internet: notas, abrir apps y música (Musicolet). */
-class EjecutorLocal(context: Context) {
+        val compartir = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, texto)
+        }
 
-    companion object {
-        const val PAQUETE_MUSICOLET = "in.krosbits.musicolet"
-    }
-
-    private val appContext = context.applicationContext
-    private val pm: PackageManager = appContext.packageManager
-    private val notas = NotasRepositorio(appContext)
-
-    private class Candidata(val etiqueta: String, val intent: Intent, val puntaje: Int)
-
-    suspend fun ejecutar(intencion: Intencion): ResultadoComando = when (intencion) {
-        is Intencion.CrearNota -> crearNota(intencion.contenido)
-        is Intencion.AbrirAplicacion -> withContext(Dispatchers.Default) { abrirAplicacion(intencion.nombreApp) }
-        is Intencion.ReproducirMusica -> reproducirMusica(intencion.consulta)
-        is Intencion.ConsultaIA -> ResultadoComando(false, "Esta consulta necesita Gemini.")
-    }
-
-    // --- Notas ---------------------------------------------------------------------------
-
-    private suspend fun crearNota(texto: String): ResultadoComando {
-        if (texto.isBlank()) return ResultadoComando(false, "¿Qué quieres anotar?")
-        withContext(Dispatchers.IO) { notas.agregar(texto) }
-        return ResultadoComando(true, "Nota guardada: «$texto»")
+        return try {
+            val selector = Intent.createChooser(compartir, "Guardar nota con…").apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            appContext.startActivity(selector)
+            ResultadoComando(
+                true,
+                "Elige una aplicación de notas para guardar el texto."
+            )
+        } catch (e: Exception) {
+            ResultadoComando(
+                false,
+                "No pude abrir las aplicaciones disponibles para compartir la nota."
+            )
+        }
     }
 
     // --- Abrir aplicaciones (búsqueda dinámica en las apps instaladas) --------------------
@@ -105,7 +95,9 @@ class EjecutorLocal(context: Context) {
                 .setPackage(PAQUETE_MUSICOLET)
                 .putExtra(MediaStore.EXTRA_MEDIA_FOCUS, "vnd.android.cursor.item/*")
                 .putExtra(SearchManager.QUERY, consulta)
-            if (iniciar(buscar)) return ResultadoComando(true, "Buscando «$consulta» en Musicolet")
+            if (iniciar(buscar)) {
+                return ResultadoComando(true, "Buscando «$consulta» en Musicolet")
+            }
         }
         return lanzar(abrir, "Musicolet abierto")
     }
