@@ -1,3 +1,4 @@
+
 package com.miasistente.app.service
 
 import android.app.Service
@@ -13,6 +14,8 @@ import android.view.View
 import android.view.ViewConfiguration
 import android.view.WindowManager
 import android.widget.Toast
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.lifecycle.Lifecycle
@@ -22,7 +25,6 @@ import androidx.lifecycle.ViewModelStore
 import androidx.lifecycle.ViewModelStoreOwner
 import androidx.lifecycle.setViewTreeLifecycleOwner
 import androidx.lifecycle.setViewTreeViewModelStoreOwner
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.savedstate.SavedStateRegistry
 import androidx.savedstate.SavedStateRegistryController
 import androidx.savedstate.SavedStateRegistryOwner
@@ -66,7 +68,9 @@ class OverlayAvatarService : Service(),
                 performRestore(null)
             }
 
-        lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
+        lifecycleRegistry.handleLifecycleEvent(
+            Lifecycle.Event.ON_CREATE
+        )
 
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
     }
@@ -109,10 +113,11 @@ class OverlayAvatarService : Service(),
 
             isClickable = true
 
-           setContent {
-                val currentState by AsistenteService.assistantState.collectAsState(
-                    initial = AsistenteService.assistantState.value
-                )
+            setContent {
+                val currentState by
+                    AsistenteService.assistantState.collectAsState(
+                        initial = AsistenteService.assistantState.value
+                    )
 
                 AsistenteTema {
                     AssistantAvatarView(
@@ -120,7 +125,7 @@ class OverlayAvatarService : Service(),
                     )
                 }
             }
-             
+
             setOnTouchListener(createDragListener())
         }
 
@@ -152,6 +157,7 @@ class OverlayAvatarService : Service(),
             lifecycleRegistry.handleLifecycleEvent(
                 Lifecycle.Event.ON_START
             )
+
             lifecycleRegistry.handleLifecycleEvent(
                 Lifecycle.Event.ON_RESUME
             )
@@ -162,7 +168,8 @@ class OverlayAvatarService : Service(),
     }
 
     private fun createDragListener(): View.OnTouchListener {
-        val touchSlop = ViewConfiguration.get(this).scaledTouchSlop
+        val touchSlop =
+            ViewConfiguration.get(this).scaledTouchSlop
 
         var initialX = 0
         var initialY = 0
@@ -193,15 +200,22 @@ class OverlayAvatarService : Service(),
                     if (!isDragging) {
                         isDragging =
                             abs(deltaX) > touchSlop ||
-                            abs(deltaY) > touchSlop
+                                abs(deltaY) > touchSlop
                     }
 
-                    if (isDragging && isViewAdded && view.isAttachedToWindow) {
+                    if (
+                        isDragging &&
+                        isViewAdded &&
+                        view.isAttachedToWindow
+                    ) {
                         params.x = initialX + deltaX.toInt()
                         params.y = initialY + deltaY.toInt()
 
                         try {
-                            windowManager.updateViewLayout(view, params)
+                            windowManager.updateViewLayout(
+                                view,
+                                params
+                            )
                         } catch (_: IllegalArgumentException) {
                             isViewAdded = false
                         } catch (_: IllegalStateException) {
@@ -259,7 +273,7 @@ class OverlayAvatarService : Service(),
                 windowManager.removeViewImmediate(view)
             }
         } catch (_: RuntimeException) {
-            // La ventana ya puede no estar registrada.
+            // La ventana puede haber sido retirada previamente.
         } finally {
             isViewAdded = false
 
@@ -273,13 +287,19 @@ class OverlayAvatarService : Service(),
 
     override fun onDestroy() {
         if (::lifecycleRegistry.isInitialized) {
-            if (lifecycleRegistry.currentState == Lifecycle.State.RESUMED) {
+            if (
+                lifecycleRegistry.currentState ==
+                Lifecycle.State.RESUMED
+            ) {
                 lifecycleRegistry.handleLifecycleEvent(
                     Lifecycle.Event.ON_PAUSE
                 )
             }
 
-            if (lifecycleRegistry.currentState == Lifecycle.State.STARTED) {
+            if (
+                lifecycleRegistry.currentState ==
+                Lifecycle.State.STARTED
+            ) {
                 lifecycleRegistry.handleLifecycleEvent(
                     Lifecycle.Event.ON_STOP
                 )
