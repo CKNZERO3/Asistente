@@ -91,7 +91,7 @@ fun AssistantControlCard(
                     .padding(8.dp),
                 contentAlignment = Alignment.Center
             ) {
-                AssistantAvatarView(currentState = currentAvatarState)
+                AssistantAvatarView()
             }
 
             Row(
