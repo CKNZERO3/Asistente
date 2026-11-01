@@ -9,9 +9,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -24,8 +22,6 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.miasistente.app.comandos.Nota
-import com.miasistente.app.comandos.NotasRepositorio
 import com.miasistente.app.comandos.ProcesadorComandos
 import com.miasistente.app.data.Ajustes
 import com.miasistente.app.data.AvatarRepositorio
@@ -36,9 +32,6 @@ import com.miasistente.app.service.OverlayAvatarService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 data class ChatMessage(
     val text: String,
@@ -53,6 +46,7 @@ private fun permisosParaServicio(): List<String> = buildList {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PantallaPrincipal() {
     val context = LocalContext.current
@@ -61,12 +55,13 @@ fun PantallaPrincipal() {
     val ajustes = remember { Ajustes(context) }
     val almacen = remember { SecureStorage(context) }
     val procesador = remember { ProcesadorComandos(context) }
-    val notasRepositorio = remember { NotasRepositorio(context) }
 
+    // La única fuente de verdad del estado del asistente sigue siendo el servicio.
     val activo by AsistenteService.isRunning.collectAsStateWithLifecycle()
     val estado by AsistenteService.estadoAudio.collectAsStateWithLifecycle()
 
-    var selectedTab by remember { mutableIntStateOf(0) }
+    val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
+    var mostrarConfiguracionRapida by remember { mutableStateOf(false) }
 
     var chatMessages by remember {
         mutableStateOf(
@@ -81,23 +76,19 @@ fun PantallaPrincipal() {
 
     LaunchedEffect(Unit) {
         AsistenteService.eventosComando.collect { evento ->
-            chatMessages = chatMessages + ChatMessage(text = evento.comandoUsuario, isUser = true)
-            chatMessages = chatMessages + ChatMessage(text = evento.respuesta, isUser = false)
+            chatMessages = chatMessages + ChatMessage(
+                text = evento.comandoUsuario,
+                isUser = true
+            )
+            chatMessages = chatMessages + ChatMessage(
+                text = evento.respuesta,
+                isUser = false
+            )
         }
     }
 
     var inputText by remember { mutableStateOf("") }
     var isSending by remember { mutableStateOf(false) }
-
-    var notasList by remember { mutableStateOf(emptyList<Nota>()) }
-
-    LaunchedEffect(selectedTab) {
-        if (selectedTab == 1) {
-            notasList = withContext(Dispatchers.IO) {
-                notasRepositorio.listar()
-            }
-        }
-    }
 
     var microfonoOk by remember { mutableStateOf(Permisos.microfono(context)) }
     var superposicionOk by remember { mutableStateOf(Permisos.superposicion(context)) }
@@ -183,87 +174,163 @@ fun PantallaPrincipal() {
         tieneClave = withContext(Dispatchers.IO) { almacen.tieneApiKey() }
     }
 
-    var overlayActivo by remember { mutableStateOf(false) }
+    var overlayActivo by remember {
+        mutableStateOf(false)
+    }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Paleta.Fondo)
-            .safeDrawingPadding(),
-        contentAlignment = Alignment.TopCenter
-    ) {
-        Column(
-            modifier = Modifier
-                .widthIn(max = 640.dp)
-                .fillMaxSize()
-        ) {
-            Surface(
-                color = Paleta.Tarjeta,
-                modifier = Modifier.fillMaxWidth()
+    fun alternarAvatarFlotante() {
+        superposicionOk = Permisos.superposicion(context)
+        if (!superposicionOk) {
+            context.startActivity(Permisos.intentSuperposicion(context))
+        } else if (overlayActivo) {
+            OverlayAvatarService.stop(context)
+            overlayActivo = false
+        } else {
+            OverlayAvatarService.start(context)
+            overlayActivo = true
+        }
+    }
+
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        drawerContent = {
+            ModalDrawerSheet(
+                drawerContainerColor = Paleta.Fondo
             ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "🤖 Asistente IA",
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold,
-                            color = Paleta.Texto,
-                            modifier = Modifier.weight(1f)
-                        )
-
-                        FilledTonalButton(
-                            onClick = {
-                                superposicionOk = Permisos.superposicion(context)
-                                if (!superposicionOk) {
-                                    context.startActivity(Permisos.intentSuperposicion(context))
-                                } else if (overlayActivo) {
-                                    OverlayAvatarService.stop(context)
-                                    overlayActivo = false
-                                } else {
-                                    OverlayAvatarService.start(context)
-                                    overlayActivo = true
+                Column(
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .widthIn(min = 280.dp, max = 360.dp)
+                        .padding(horizontal = 16.dp, vertical = 20.dp)
+                ) {
+                    Text(
+                        text = "⚙️ Configuración y controles",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = Paleta.Texto
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    Box(modifier = Modifier.weight(1f)) {
+                        ControlsTabContent(
+                        activo = activo,
+                        estado = estado,
+                        microfonoOk = microfonoOk,
+                        superposicionOk = superposicionOk,
+                        palabraEscrita = palabraEscrita,
+                        onPalabraChanged = { palabraEscrita = it },
+                        avatar = avatar,
+                        imagenPersonalizada = imagenPersonalizada,
+                        mensajeAvatar = mensajeAvatar,
+                        tieneClave = tieneClave,
+                        onActivarServicio = { activarServicio() },
+                        onPedirMicrofono = {
+                            if (microfonoDenegado) {
+                                context.startActivity(Permisos.intentAjustesApp(context))
+                            } else {
+                                lanzadorPermisos.launch(
+                                    arrayOf(Manifest.permission.RECORD_AUDIO)
+                                )
+                            }
+                        },
+                        onPedirSuperposicion = {
+                            context.startActivity(Permisos.intentSuperposicion(context))
+                        },
+                        onSeleccionarAvatar = {
+                            avatar = it
+                            ajustes.avatar = it
+                        },
+                        onElegirGaleria = { lanzadorGaleria.launch("image/*") },
+                        onGuardarClave = { clave ->
+                            scope.launch {
+                                withContext(Dispatchers.IO) {
+                                    almacen.guardarApiKey(clave)
+                                }
+                                tieneClave = true
+                            }
+                        },
+                        onProbarComando = { texto ->
+                            scope.launch {
+                                try {
+                                    val res = procesador.procesar(texto)
+                                    chatMessages = chatMessages + ChatMessage(
+                                        text = "Prueba [$texto]: ${res.mensaje}",
+                                        isUser = false
+                                    )
+                                    drawerState.close()
+                                } catch (exception: Exception) {
+                                    chatMessages = chatMessages + ChatMessage(
+                                        text = "Error al probar el comando. Inténtalo de nuevo.",
+                                        isUser = false
+                                    )
+                                    drawerState.close()
                                 }
                             }
-                        ) {
-                            Text(if (overlayActivo) "🪟 Ocultar Flotante" else "🪟 Avatar Flotante")
                         }
+                        )
                     }
                 }
             }
-
-            TabRow(
-                selectedTabIndex = selectedTab,
-                containerColor = Paleta.Tarjeta,
-                contentColor = Paleta.Primario
-            ) {
-                Tab(
-                    selected = selectedTab == 0,
-                    onClick = { selectedTab = 0 },
-                    text = { Text("💬 Chat") }
-                )
-                Tab(
-                    selected = selectedTab == 1,
-                    onClick = { selectedTab = 1 },
-                    text = { Text("📝 Notas") }
-                )
-                Tab(
-                    selected = selectedTab == 2,
-                    onClick = { selectedTab = 2 },
-                    text = { Text("⚙️ Controles") }
-                )
-            }
-
-            Box(
+        }
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Paleta.Fondo)
+                .safeDrawingPadding(),
+            contentAlignment = Alignment.TopCenter
+        ) {
+            Column(
                 modifier = Modifier
-                    .fillMaxWidth()
+                    .widthIn(max = 640.dp)
                     .fillMaxSize()
-                    .padding(16.dp)
             ) {
-                when (selectedTab) {
-                    0 -> ChatTabContent(
+                TopAppBar(
+                    title = {
+                        Text(
+                            text = "🤖 Asistente IA",
+                            color = Paleta.Texto,
+                            fontWeight = FontWeight.Bold
+                        )
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = {
+                            scope.launch { drawerState.open() }
+                        }) {
+                            Text("☰", style = MaterialTheme.typography.headlineSmall)
+                        }
+                    },
+                    actions = {
+                        IconButton(onClick = { mostrarConfiguracionRapida = true }) {
+                            Text("⚙️", style = MaterialTheme.typography.titleLarge)
+                        }
+                        FilledTonalButton(
+                            onClick = { alternarAvatarFlotante() },
+                            modifier = Modifier.padding(end = 8.dp)
+                        ) {
+                            Text(if (overlayActivo) "Ocultar flotante" else "Avatar flotante")
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = Paleta.Tarjeta,
+                        titleContentColor = Paleta.Texto
+                    )
+                )
+
+                mensaje?.let {
+                    Text(
+                        text = it,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                    )
+                }
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .padding(16.dp)
+                ) {
+                    ChatTabContent(
                         messages = chatMessages,
                         inputText = inputText,
                         onInputChanged = { inputText = it },
@@ -271,7 +338,10 @@ fun PantallaPrincipal() {
                         onSend = { query ->
                             if (query.isBlank() || isSending) return@ChatTabContent
 
-                            chatMessages = chatMessages + ChatMessage(text = query, isUser = true)
+                            chatMessages = chatMessages + ChatMessage(
+                                text = query,
+                                isUser = true
+                            )
                             inputText = ""
                             isSending = true
 
@@ -293,64 +363,51 @@ fun PantallaPrincipal() {
                             }
                         }
                     )
-
-                    1 -> NotesTabContent(notes = notasList)
-
-                    2 -> ControlsTabContent(
-                        activo = activo,
-                        estado = estado,
-                        microfonoOk = microfonoOk,
-                        superposicionOk = superposicionOk,
-                        palabraEscrita = palabraEscrita,
-                        onPalabraChanged = { palabraEscrita = it },
-                        avatar = avatar,
-                        imagenPersonalizada = imagenPersonalizada,
-                        mensajeAvatar = mensajeAvatar,
-                        tieneClave = tieneClave,
-                        onActivarServicio = { activarServicio() },
-                        onPedirMicrofono = {
-                            if (microfonoDenegado) {
-                                context.startActivity(Permisos.intentAjustesApp(context))
-                            } else {
-                                lanzadorPermisos.launch(arrayOf(Manifest.permission.RECORD_AUDIO))
-                            }
-                        },
-                        onPedirSuperposicion = {
-                            context.startActivity(Permisos.intentSuperposicion(context))
-                        },
-                        onSeleccionarAvatar = {
-                            avatar = it
-                            ajustes.avatar = it
-                        },
-                        onElegirGaleria = { lanzadorGaleria.launch("image/*") },
-                        onGuardarClave = { clave ->
-                            scope.launch {
-                                withContext(Dispatchers.IO) { almacen.guardarApiKey(clave) }
-                                tieneClave = true
-                            }
-                        },
-                        onProbarComando = { texto ->
-                            scope.launch {
-                                try {
-                                    val res = procesador.procesar(texto)
-                                    chatMessages = chatMessages + ChatMessage(
-                                        text = "Prueba [$texto]: ${res.mensaje}",
-                                        isUser = false
-                                    )
-                                    selectedTab = 0
-                                } catch (exception: Exception) {
-                                    chatMessages = chatMessages + ChatMessage(
-                                        text = "Error al probar el comando. Inténtalo de nuevo.",
-                                        isUser = false
-                                    )
-                                    selectedTab = 0
-                                }
-                            }
-                        }
-                    )
                 }
             }
         }
+    }
+
+    if (mostrarConfiguracionRapida) {
+        AlertDialog(
+            onDismissRequest = { mostrarConfiguracionRapida = false },
+            title = { Text("Configuración rápida") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        if (activo) "El asistente está activo." else "El asistente está detenido."
+                    )
+                    Text(
+                        if (superposicionOk) "Permiso de ventana flotante concedido."
+                        else "Permiso de ventana flotante pendiente."
+                    )
+                    OutlinedButton(
+                        onClick = {
+                            alternarAvatarFlotante()
+                            mostrarConfiguracionRapida = false
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(if (overlayActivo) "Ocultar avatar flotante" else "Mostrar avatar flotante")
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { mostrarConfiguracionRapida = false }) {
+                    Text("Cerrar")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        mostrarConfiguracionRapida = false
+                        scope.launch { drawerState.open() }
+                    }
+                ) {
+                    Text("Todos los ajustes")
+                }
+            }
+        )
     }
 }
 
@@ -421,53 +478,6 @@ fun ChatBubble(message: ChatMessage) {
                 modifier = Modifier.padding(12.dp),
                 style = MaterialTheme.typography.bodyMedium
             )
-        }
-    }
-}
-
-@Composable
-fun NotesTabContent(notes: List<Nota>) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        if (notes.isEmpty()) {
-            Text(
-                text = "No hay notas guardadas aún.",
-                color = Paleta.TextoSuave,
-                modifier = Modifier.padding(top = 24.dp)
-            )
-        } else {
-            notes.forEach { note ->
-                Surface(
-                    shape = RoundedCornerShape(16.dp),
-                    color = Paleta.Tarjeta,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Text(
-                            text = note.texto,
-                            color = Paleta.Texto,
-                            fontWeight = FontWeight.Medium
-                        )
-
-                        Spacer(Modifier.height(4.dp))
-
-                        val fechaStr = SimpleDateFormat(
-                            "dd/MM/yyyy HH:mm",
-                            Locale.getDefault()
-                        ).format(Date(note.fechaMs))
-
-                        Text(
-                            text = fechaStr,
-                            color = Paleta.TextoSuave,
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    }
-                }
-            }
         }
     }
 }
