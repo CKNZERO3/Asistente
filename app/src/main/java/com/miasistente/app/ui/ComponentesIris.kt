@@ -4,6 +4,7 @@ import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
@@ -468,9 +469,6 @@ fun BarraEntradaIris(
  *  - LISTENING:      ondas que se expanden
  *  - THINKING:       arco que gira
  *  - SPEAKING:       latido con resplandor
- *
- * Las animaciones se leen dentro de los bloques de dibujo, así solo se redibuja el botón
- * (no se recompone toda la pantalla 60 veces por segundo).
  */
 @Composable
 fun BotonMicrofono(
