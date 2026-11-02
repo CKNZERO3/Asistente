@@ -6,15 +6,13 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.*
-import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.lifecycleScope
 import com.miasistente.app.comandos.ProcesadorComandos
-import com.miasistente.app.comandos.ResultadoComando
 import com.miasistente.app.dominio.AssistantState
 import com.miasistente.app.service.AsistenteService
 import com.miasistente.app.ui.AsistenteTema
-import com.miasistente.app.ui.IrisHomeScreen
+import com.miasistente.app.ui.IrisScreen
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -28,38 +26,46 @@ class MainActivity : ComponentActivity() {
         setContent {
             AsistenteTema {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    val assistantState by AsistenteService.assistantState.collectAsState()
                     val isServiceRunning by AsistenteService.isRunning.collectAsState()
 
-                    var ultimoComando by remember { mutableStateOf("") }
-                    var resultadoComando by remember { mutableStateOf<ResultadoComando?>(null) }
-                    var estaProcesando by remember { mutableStateOf(false) }
+                    var userName by remember { mutableStateOf<String?>(null) }
+                    var avatarEnabled by remember { mutableStateOf(false) }
 
-                    IrisHomeScreen(
-                        assistantState = assistantState,
-                        ultimoComando = ultimoComando,
-                        resultadoComando = resultadoComando,
-                        estaProcesando = estaProcesando,
-                        isServiceRunning = isServiceRunning,
-                        onSendMessage = { mensajeTexto ->
-                            ultimoComando = mensajeTexto
-                            resultadoComando = null
+                    IrisScreen(
+                        userName = userName,
+                        profilePicture = null,
+                        avatarEnabled = avatarEnabled,
+                        onAvatarChanged = { enabled ->
+                            avatarEnabled = enabled
+                        },
+                        onSend = { mensajeTexto ->
                             lifecycleScope.launch {
-                                estaProcesando = true
                                 AsistenteService.updateAssistantState(AssistantState.THINKING)
-                                
-                                val res = procesador.procesar(mensajeTexto)
-                                resultadoComando = res
-                                
-                                estaProcesando = false
+                                procesador.procesar(mensajeTexto)
                                 AsistenteService.updateAssistantState(AssistantState.IDLE)
                             }
                         },
-                        onAlternarServicio = {
+                        onVoice = {
                             if (isServiceRunning) {
                                 AsistenteService.stop(this)
                             } else {
                                 AsistenteService.start(this)
+                            }
+                        },
+                        onAttach = {
+                            // Lógica para adjuntar
+                        },
+                        onAction = { destination ->
+                            when (destination) {
+                                "sign_in" -> { /* Iniciar sesión */ }
+                                "search" -> { /* Buscar */ }
+                                "gallery" -> { /* Galería */ }
+                                "new_chat" -> { /* Nuevo chat */ }
+                                "permissions" -> { /* Permisos */ }
+                                "about" -> { /* Acerca de */ }
+                                "privacy" -> { /* Privacidad */ }
+                                "support" -> { /* Soporte */ }
+                                "settings" -> { /* Ajustes */ }
                             }
                         }
                     )
