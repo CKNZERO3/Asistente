@@ -1,49 +1,52 @@
 package com.miasistente.app
 
-import android.graphics.Color
 import android.os.Bundle
 import androidx.activity.ComponentActivity
-import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
-import androidx.activity.enableEdgeToEdge
-import androidx.compose.runtime.getValue
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import androidx.lifecycle.lifecycleScope
 import com.miasistente.app.comandos.ProcesadorComandos
-import com.miasistente.app.data.PerfilUsuario
-import com.miasistente.app.service.AsistenteService
 import com.miasistente.app.ui.IrisHomeScreen
+import com.miasistente.app.ui.theme.MiAsistenteTheme
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
+    private lateinit var procesador: ProcesadorComandos
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge(
-            statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
-            navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT)
-        )
 
-        val procesador = ProcesadorComandos(this)
-        val perfil = PerfilUsuario(this)
+        // Inicialización de componentes principales
+        procesador = ProcesadorComandos(this)
 
         setContent {
-            val isServiceActive by AsistenteService.isRunning.collectAsStateWithLifecycle()
+            MiAsistenteTheme {
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = MaterialTheme.colorScheme.background
+                ) {
+                    var ultimoMensajeRespuesta by remember { mutableStateOf("") }
+                    var estaCargando by remember { mutableStateOf(false) }
 
-            IrisHomeScreen(
-                userName = perfil.nombre.ifBlank { "Chris" },
-                temperature = null,
-                weatherLabel = null,
-                onSendMessage = { mensajeTexto ->
-                    procesador.procesar(mensajeTexto)
-                },
-                onMicrophoneClick = {
-                    if (isServiceActive) {
-                        AsistenteService.stop(this)
-                    } else {
-                        AsistenteService.start(this)
-                    }
+                    IrisHomeScreen(
+                        respuestaAsistente = ultimoMensajeRespuesta,
+                        estaCargando = estaCargando,
+                        onSendMessage = { mensajeTexto ->
+                            lifecycleScope.launch {
+                                estaCargando = true
+                                val respuesta = procesador.procesar(mensajeTexto)
+                                ultimoMensajeRespuesta = respuesta
+                                estaCargando = false
+                            }
+                        }
+                    )
                 }
-            )
+            }
         }
     }
 }
- 
