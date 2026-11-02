@@ -7,71 +7,138 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import com.miasistente.app.comandos.ResultadoComando
+import com.miasistente.app.data.Ajustes
+import com.miasistente.app.data.AvatarRepositorio
+import com.miasistente.app.data.Permisos
+import com.miasistente.app.dominio.AssistantState
+import com.miasistente.app.service.AsistenteService
+import kotlinx.coroutines.flow.collectAsState
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @Composable
 fun IrisHomeScreen(
-    respuestaAsistente: String,
-    estaCargando: Boolean,
-    onSendMessage: (String) -> Unit
+    assistantState: AssistantState,
+    ultimoComando: String,
+    resultadoComando: ResultadoComando?,
+    estaProcesando: Boolean,
+    onSendMessage: (String) -> Unit,
+    onAlternarServicio: () -> Unit,
+    isServiceRunning: Boolean
 ) {
     val context = LocalContext.current
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
 
-    // Manejo local de SharedPreferences para la API Key
-    val prefs = remember { context.getSharedPreferences("miasistente_prefs", Context.MODE_PRIVATE) }
-    var apiKey by remember { mutableStateOf(prefs.getString("gemini_api_key", "") ?: "") }
+    val ajustes = remember { Ajustes(context) }
+    var avatarId by remember { mutableStateOf(ajustes.avatar) }
+    var imagenPersonalizada by remember { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
+    
+    // Cargar avatar personalizado si aplica
+    LaunchedEffect(Unit) {
+        imagenPersonalizada = AvatarRepositorio.cargar(context)
+    }
+
+    val formatoFecha = remember { SimpleDateFormat("EEEE, d 'de' MMMM", Locale("es", "ES")) }
+    val formatoHora = remember { SimpleDateFormat("HH:mm", Locale("es", "ES")) }
+    val fechaActual = remember { formatoFecha.format(Date()).replaceFirstChar { it.uppercase() } }
+    val horaActual = remember { formatoHora.format(Date()) }
+
+    val microfonoOk = Permisos.microfono(context)
+    val superposicionOk = Permisos.superposicion(context)
+    val hayAvisoPermisos = !microfonoOk || !superposicionOk
+
+    var textoInput by remember { mutableStateOf("") }
 
     ModalNavigationDrawer(
         drawerState = drawerState,
         drawerContent = {
-            ModalDrawerSheet {
+            ModalDrawerSheet(
+                drawerContainerColor = PaletaIris.PanelLateral
+            ) {
                 IrisDrawerContent(
-                    apiKeyActual = apiKey,
-                    onGuardarApiKey = { nuevaKey ->
-                        apiKey = nuevaKey
-                        prefs.edit().putString("gemini_api_key", nuevaKey).apply()
-                        scope.launch { drawerState.close() }
-                    },
-                    onSeleccionarAvatar = { avatarId ->
-                        prefs.edit().putString("selected_avatar", avatarId).apply()
-                        scope.launch { drawerState.close() }
-                    }
+                    context = context,
+                    onCerrar = { scope.launch { drawerState.close() } }
                 )
             }
         }
     ) {
-        Scaffold(
-            topBar = {
-                // Aquí va tu barra superior existente de Iris
-            }
-        ) { paddingValues ->
+        FondoNoche(modifier = Modifier.fillMaxSize()) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(paddingValues)
-                    .padding(16.dp)
+                    .statusBarsPadding()
+                    .navigationBarsPadding()
             ) {
-                // Área de respuesta del asistente
-                if (respuestaAsistente.isNotEmpty()) {
-                    Text(
-                        text = respuestaAsistente,
-                        style = MaterialTheme.typography.bodyLarge,
-                        modifier = Modifier.padding(bottom = 16.dp)
-                    )
-                }
-
-                if (estaCargando) {
-                    CircularProgressIndicator()
-                }
-
-                Spacer(modifier = Modifier.weight(1f))
-
-                // Componente de entrada de mensaje (IrisComposer)
-                IrisComposer(
-                    onSendMessage = onSendMessage
+                // Barra Superior
+                BarraSuperiorIris(
+                    activo = isServiceRunning,
+                    avatarId = avatarId,
+                    imagenPersonalizada = imagenPersonalizada,
+                    hayAviso = hayAvisoPermisos,
+                    onAbrirAjustes = { scope.launch { drawerState.open() } }
                 )
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .padding(horizontal = 20.dp),
+                    verticalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column {
+                        Spacer(Modifier.height(12.dp))
+                        CabeceraFechaClima(fecha = fechaActual, hora = horaActual)
+                        Spacer(Modifier.height(24.dp))
+                        SaludoPrincipal(saludo = "Hola, Cristian")
+                        
+                        Spacer(Modifier.height(24.dp))
+
+                        // Estado del asistente en tiempo real
+                        ChipEstado(
+                            texto = when (assistantState) {
+                                AssistantState.IDLE -> if (isServiceRunning) "Iris escuchando..." else "Iris pausada"
+                                AssistantState.LISTENING -> "Escuchando tu voz..."
+                                AssistantState.THINKING -> "Pensando..."
+                                AssistantState.SPEAKING -> "Respondiendo..."
+                            },
+                            color = if (isServiceRunning) PaletaIris.Acento else Color.Gray
+                        )
+
+                        // Mostrar tarjeta de conversación si hay interacción reciente
+                        if (ultimoComando.isNotBlank()) {
+                            Spacer(Modifier.height(16.dp))
+                            TarjetaConversacion(
+                                comando = ultimoComando,
+                                resultado = resultadoComando,
+                                procesando = estaProcesando,
+                                onCerrar = { /* Opcional limpiar */ }
+                            )
+                        }
+                    }
+
+                    // Barra de entrada flotante inferior (BarraEntradaIris)
+                    Column(modifier = Modifier.padding(bottom = 16.dp)) {
+                        BarraEntradaIris(
+                            texto = textoInput,
+                            onTexto = { textoInput = it },
+                            onEnviar = {
+                                if (textoInput.isNotBlank()) {
+                                    onSendMessage(textoInput)
+                                    textoInput = ""
+                                }
+                            },
+                            estado = assistantState,
+                            activo = isServiceRunning,
+                            onMicrofono = {
+                                onAlternarServicio()
+                            }
+                        )
+                    }
+                }
             }
         }
     }
