@@ -11,7 +11,6 @@ import androidx.compose.ui.Modifier
 import androidx.lifecycle.lifecycleScope
 import com.miasistente.app.comandos.ProcesadorComandos
 import com.miasistente.app.ui.IrisHomeScreen
-import com.miasistente.app.ui.theme.MiAsistenteTheme
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -21,11 +20,11 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Inicialización de componentes principales
         procesador = ProcesadorComandos(this)
 
         setContent {
-            MiAsistenteTheme {
+            // Usamos MaterialTheme directamente si el tema general está en el root o ajusta tu paquete de tema
+            MaterialTheme {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
@@ -39,8 +38,9 @@ class MainActivity : ComponentActivity() {
                         onSendMessage = { mensajeTexto ->
                             lifecycleScope.launch {
                                 estaCargando = true
-                                val respuesta = procesador.procesar(mensajeTexto)
-                                ultimoMensajeRespuesta = respuesta
+                                val resultado = procesador.procesar(mensajeTexto)
+                                // Convertimos el resultado a texto dependiendo de cómo esté estructurado tu objeto
+                                ultimoMensajeRespuesta = resultado.toString() 
                                 estaCargando = false
                             }
                         }
