@@ -1,4 +1,4 @@
-      package com.miasistente.app.ui
+package com.miasistente.app.ui
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.clickable
