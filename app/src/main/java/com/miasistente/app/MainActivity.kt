@@ -1,5 +1,6 @@
 package com.miasistente.app
 
+import androidx.compose.runtime.collectAsState
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
