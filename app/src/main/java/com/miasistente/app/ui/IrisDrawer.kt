@@ -14,7 +14,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun IrisDrawerContent(
     apiKeyActual: String,
@@ -30,7 +29,6 @@ fun IrisDrawerContent(
             .background(Color(0xFF12131C))
             .padding(20.dp)
     ) {
-        // Tipografía de Iris
         Text(
             text = "Iris",
             fontSize = 36.sp,
@@ -41,7 +39,6 @@ fun IrisDrawerContent(
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        // Sección de API Key
         Text("Configuración de IA", color = Color.Gray, fontSize = 12.sp)
         Spacer(modifier = Modifier.height(8.dp))
         
@@ -50,13 +47,7 @@ fun IrisDrawerContent(
             onValueChange = { keyText = it },
             label = { Text("Gemini API Key") },
             singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
-            colors = TextFieldDefaults.outlinedTextFieldColors(
-                focusedBorderColor = Color(0xFF8E8FFA),
-                unfocusedBorderColor = Color.DarkGray,
-                focusedLabelColor = Color(0xFF8E8FFA),
-                unfocusedLabelColor = Color.Gray
-            )
+            modifier = Modifier.fillMaxWidth()
         )
         
         Button(
@@ -69,9 +60,8 @@ fun IrisDrawerContent(
             Text("Guardar Clave", color = Color.Black)
         }
 
-        Divider(modifier = Modifier.padding(vertical = 20.dp), color = Color.DarkGray)
+        HorizontalDivider(modifier = Modifier.padding(vertical = 20.dp), color = Color.DarkGray)
 
-        // Selección de Avatar
         Text("Personalización de Avatar", color = Color.Gray, fontSize = 12.sp)
         Spacer(modifier = Modifier.height(8.dp))
         
