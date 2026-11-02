@@ -37,7 +37,9 @@
 
     <application
         android:allowBackup="false"
-        android:label="Asistente"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
+        android:label="Iris"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.NoActionBar">
 
