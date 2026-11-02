@@ -1,6 +1,5 @@
 package com.miasistente.app
 
-import androidx.compose.runtime.collectAsState
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -8,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.lifecycle.compose.collectAsState
 import androidx.lifecycle.lifecycleScope
 import com.miasistente.app.comandos.ProcesadorComandos
 import com.miasistente.app.comandos.ResultadoComando
@@ -15,7 +15,6 @@ import com.miasistente.app.dominio.AssistantState
 import com.miasistente.app.service.AsistenteService
 import com.miasistente.app.ui.AsistenteTema
 import com.miasistente.app.ui.IrisHomeScreen
-import kotlinx.coroutines.flow.collectAsState
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
