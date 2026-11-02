@@ -6,8 +6,8 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.*
+import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Modifier
-import androidx.lifecycle.compose.collectAsState
 import androidx.lifecycle.lifecycleScope
 import com.miasistente.app.comandos.ProcesadorComandos
 import com.miasistente.app.comandos.ResultadoComando
@@ -18,15 +18,11 @@ import com.miasistente.app.ui.IrisHomeScreen
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
-
     private lateinit var procesador: ProcesadorComandos
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
         procesador = ProcesadorComandos(this)
-
-        // Iniciar servicio en segundo plano automáticamente si se desea
         AsistenteService.start(this)
 
         setContent {
