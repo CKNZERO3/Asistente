@@ -1,21 +1,21 @@
+
 package com.miasistente.app.ui
 
-import androidx.compose.runtime.collectAsState
-import androidx.compose.ui.graphics.Color
 import android.content.Context
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsState
 import com.miasistente.app.comandos.ResultadoComando
 import com.miasistente.app.data.Ajustes
 import com.miasistente.app.data.AvatarRepositorio
 import com.miasistente.app.data.Permisos
 import com.miasistente.app.dominio.AssistantState
 import com.miasistente.app.service.AsistenteService
-import kotlinx.coroutines.flow.collectAsState
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
