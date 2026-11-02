@@ -1,15 +1,14 @@
-
 package com.miasistente.app.ui
 
 import android.content.Context
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsState
 import com.miasistente.app.comandos.ResultadoComando
 import com.miasistente.app.data.Ajustes
 import com.miasistente.app.data.AvatarRepositorio
@@ -39,7 +38,6 @@ fun IrisHomeScreen(
     var avatarId by remember { mutableStateOf(ajustes.avatar) }
     var imagenPersonalizada by remember { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
     
-    // Cargar avatar personalizado si aplica
     LaunchedEffect(Unit) {
         imagenPersonalizada = AvatarRepositorio.cargar(context)
     }
@@ -75,7 +73,6 @@ fun IrisHomeScreen(
                     .statusBarsPadding()
                     .navigationBarsPadding()
             ) {
-                // Barra Superior
                 BarraSuperiorIris(
                     activo = isServiceRunning,
                     avatarId = avatarId,
@@ -99,7 +96,6 @@ fun IrisHomeScreen(
                         
                         Spacer(Modifier.height(24.dp))
 
-                        // Estado del asistente en tiempo real
                         ChipEstado(
                             texto = when (assistantState) {
                                 AssistantState.IDLE -> if (isServiceRunning) "Iris escuchando..." else "Iris pausada"
@@ -110,19 +106,17 @@ fun IrisHomeScreen(
                             color = if (isServiceRunning) PaletaIris.Acento else Color.Gray
                         )
 
-                        // Mostrar tarjeta de conversación si hay interacción reciente
                         if (ultimoComando.isNotBlank()) {
                             Spacer(Modifier.height(16.dp))
                             TarjetaConversacion(
                                 comando = ultimoComando,
                                 resultado = resultadoComando,
                                 procesando = estaProcesando,
-                                onCerrar = { /* Opcional limpiar */ }
+                                onCerrar = { }
                             )
                         }
                     }
 
-                    // Barra de entrada flotante inferior (BarraEntradaIris)
                     Column(modifier = Modifier.padding(bottom = 16.dp)) {
                         BarraEntradaIris(
                             texto = textoInput,
