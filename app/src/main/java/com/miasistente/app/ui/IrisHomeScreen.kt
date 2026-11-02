@@ -1,5 +1,7 @@
 package com.miasistente.app.ui
 
+import androidx.compose.runtime.collectAsState
+import androidx.compose.ui.graphics.Color
 import android.content.Context
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
