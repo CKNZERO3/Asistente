@@ -6,13 +6,13 @@ import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import com.miasistente.app.ui.AsistenteTema
-import com.miasistente.app.ui.PantallaPrincipal
+import androidx.compose.runtime.getValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.miasistente.app.comandos.ProcesadorComandos
+import com.miasistente.app.data.PerfilUsuario
+import com.miasistente.app.service.AsistenteService
+import com.miasistente.app.ui.IrisHomeScreen
 
-/**
- * Actividad principal. Solo arranca la interfaz: toda la pantalla vive en la carpeta ui/.
- * El tema es oscuro, así que las barras del sistema se dibujan con iconos claros.
- */
 class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -21,10 +21,29 @@ class MainActivity : ComponentActivity() {
             statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT)
         )
+
+        val procesador = ProcesadorComandos(this)
+        val perfil = PerfilUsuario(this)
+
         setContent {
-            AsistenteTema {
-                PantallaPrincipal()
-            }
+            val isServiceActive by AsistenteService.isRunning.collectAsStateWithLifecycle()
+
+            IrisHomeScreen(
+                userName = perfil.nombre.ifBlank { "Chris" },
+                temperature = null,
+                weatherLabel = null,
+                onSendMessage = { mensajeTexto ->
+                    procesador.procesar(mensajeTexto)
+                },
+                onMicrophoneClick = {
+                    if (isServiceActive) {
+                        AsistenteService.stop(this)
+                    } else {
+                        AsistenteService.start(this)
+                    }
+                }
+            )
         }
     }
 }
+ 
