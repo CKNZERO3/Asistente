@@ -4,13 +4,17 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.lifecycleScope
 import com.miasistente.app.comandos.ProcesadorComandos
+import com.miasistente.app.comandos.ResultadoComando
+import com.miasistente.app.dominio.AssistantState
+import com.miasistente.app.service.AsistenteService
+import com.miasistente.app.ui.AsistenteTema
 import com.miasistente.app.ui.IrisHomeScreen
+import kotlinx.coroutines.flow.collectAsState
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -22,26 +26,44 @@ class MainActivity : ComponentActivity() {
 
         procesador = ProcesadorComandos(this)
 
+        // Iniciar servicio en segundo plano automáticamente si se desea
+        AsistenteService.start(this)
+
         setContent {
-            // Usamos MaterialTheme directamente si el tema general está en el root o ajusta tu paquete de tema
-            MaterialTheme {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background
-                ) {
-                    var ultimoMensajeRespuesta by remember { mutableStateOf("") }
-                    var estaCargando by remember { mutableStateOf(false) }
+            AsistenteTema {
+                Surface(modifier = Modifier.fillMaxSize()) {
+                    val assistantState by AsistenteService.assistantState.collectAsState()
+                    val isServiceRunning by AsistenteService.isRunning.collectAsState()
+
+                    var ultimoComando by remember { mutableStateOf("") }
+                    var resultadoComando by remember { mutableStateOf<ResultadoComando?>(null) }
+                    var estaProcesando by remember { mutableStateOf(false) }
 
                     IrisHomeScreen(
-                        respuestaAsistente = ultimoMensajeRespuesta,
-                        estaCargando = estaCargando,
+                        assistantState = assistantState,
+                        ultimoComando = ultimoComando,
+                        resultadoComando = resultadoComando,
+                        estaProcesando = estaProcesando,
+                        isServiceRunning = isServiceRunning,
                         onSendMessage = { mensajeTexto ->
+                            ultimoComando = mensajeTexto
+                            resultadoComando = null
                             lifecycleScope.launch {
-                                estaCargando = true
-                                val resultado = procesador.procesar(mensajeTexto)
-                                // Convertimos el resultado a texto dependiendo de cómo esté estructurado tu objeto
-                                ultimoMensajeRespuesta = resultado.toString() 
-                                estaCargando = false
+                                estaProcesando = true
+                                AsistenteService.updateAssistantState(AssistantState.THINKING)
+                                
+                                val res = procesador.procesar(mensajeTexto)
+                                resultadoComando = res
+                                
+                                estaProcesando = false
+                                AsistenteService.updateAssistantState(AssistantState.IDLE)
+                            }
+                        },
+                        onAlternarServicio = {
+                            if (isServiceRunning) {
+                                AsistenteService.stop(this)
+                            } else {
+                                AsistenteService.start(this)
                             }
                         }
                     )
