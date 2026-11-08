@@ -329,7 +329,7 @@ class MainActivity : ComponentActivity() {
 
     private fun enviarCorreoSoporte() {
         val intent = Intent(Intent.ACTION_SENDTO).apply {
-            data = Uri.parse("mailto:soporte@tudominio.com") // <- cambia por tu correo
+            data = Uri.parse("mailto:contactirisasistant@gmail.com") // <- cambia por tu correo
             putExtra(Intent.EXTRA_SUBJECT, "Ayuda y sugerencias - Iris")
         }
         try {
