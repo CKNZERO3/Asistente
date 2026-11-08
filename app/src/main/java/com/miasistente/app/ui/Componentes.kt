@@ -1,5 +1,5 @@
 // DayNightToggle.kt
-package com.tuapp.ui.components
+package com.miasistente.app.ui.components
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
