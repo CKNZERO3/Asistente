@@ -41,10 +41,6 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-/**
- * Pantalla de Ajustes: apariencia (día/noche), permisos, acerca de y contacto.
- * Acciones que emite: "permissions", "about", "privacy", "support".
- */
 @Suppress("DEPRECATION")
 @Composable
 fun IrisSettingsScreen(
@@ -59,7 +55,6 @@ fun IrisSettingsScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(p.background)
-            // Evita que los toques atraviesen la pantalla hacia el chat
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {}
             .statusBarsPadding()
             .navigationBarsPadding()
@@ -84,39 +79,39 @@ fun IrisSettingsScreen(
         ) {
             
             SettingsSection("Apariencia")
-            SettingsCard(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(20.dp))
-                    .clickable { onDarkThemeChange(!darkTheme) }
-            ) {
-                Row(
+            SettingsCard {
+                Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 14.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                        .clickable { onDarkThemeChange(!darkTheme) }
+                        .padding(horizontal = 16.dp, vertical = 14.dp)
                 ) {
-                    Icon(
-                        imageVector = if (darkTheme) Icons.Default.DarkMode else Icons.Default.LightMode,
-                        contentDescription = null,
-                        tint = p.accent,
-                        modifier = Modifier.size(22.dp)
-                    )
-                    Spacer(Modifier.width(14.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text("Modo día / noche", color = p.text, fontSize = 14.sp)
-                        Text(
-                            if (darkTheme) "Oscuro" else "Claro",
-                            color = p.muted,
-                            fontSize = 12.sp
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = if (darkTheme) Icons.Default.DarkMode else Icons.Default.LightMode,
+                            contentDescription = null,
+                            tint = p.accent,
+                            modifier = Modifier.size(22.dp)
+                        )
+                        Spacer(Modifier.width(14.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("Modo día / noche", color = p.text, fontSize = 14.sp)
+                            Text(
+                                if (darkTheme) "Oscuro" else "Claro",
+                                color = p.muted,
+                                fontSize = 12.sp
+                            )
+                        }
+                        IrisDayNightSwitch(
+                            isNight = darkTheme,
+                            onToggle = onDarkThemeChange,
+                            trackWidth = 96.dp,
+                            trackHeight = 52.dp
                         )
                     }
-                    IrisDayNightSwitch(
-                        isNight = darkTheme,
-                        onToggle = onDarkThemeChange,
-                        trackWidth = 96.dp,
-                        trackHeight = 52.dp
-                    )
                 }
             }
 
