@@ -38,3 +38,143 @@ class EjecutorLocal(context: Context) {
     }
 
     private fun obtenerIndice(forzar: Boolean = false): List<Entrada> = synchronized(bloqueo) {
+        val actual = cache
+        if (actual != null && !forzar) actual else cargarIndice().also { cache = it }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun cargarIndice(): List<Entrada> {
+        val filtro = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+        val apps = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            pm.queryIntentActivities(filtro, PackageManager.ResolveInfoFlags.of(0))
+        } else {
+            pm.queryIntentActivities(filtro, 0)
+        }
+        return apps
+            .filter { it.activityInfo.packageName != appContext.packageName }
+            .map {
+                val etiqueta = it.loadLabel(pm).toString()
+                Entrada(etiqueta, normalizar(etiqueta), it.activityInfo.packageName, it.activityInfo.name)
+            }
+    }
+
+    suspend fun ejecutar(intencion: Intencion): ResultadoComando = when (intencion) {
+        is Intencion.CrearNota -> crearNota(intencion.contenido)
+        is Intencion.AbrirAplicacion ->
+            withContext(Dispatchers.Default) { abrirAplicacion(intencion.nombreApp) }
+        is Intencion.ReproducirMusica -> reproducirMusica(intencion.consulta)
+        is Intencion.ConsultaIA ->
+            ResultadoComando(false, "Esta consulta necesita Gemini.")
+    }
+
+    // --- Notas: delegar el guardado a una aplicación instalada ----------------------------
+
+    private fun crearNota(texto: String): ResultadoComando {
+        if (texto.isBlank()) {
+            return ResultadoComando(false, "¿Qué quieres anotar?")
+        }
+
+        val compartir = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, texto)
+        }
+
+        return try {
+            val selector = Intent.createChooser(compartir, "Guardar nota con…").apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            appContext.startActivity(selector)
+            ResultadoComando(
+                true,
+                "Elige una aplicación de notas para guardar el texto."
+            )
+        } catch (e: Exception) {
+            ResultadoComando(
+                false,
+                "No pude abrir las aplicaciones disponibles para compartir la nota."
+            )
+        }
+    }
+
+    // --- Abrir aplicaciones (búsqueda dinámica en las apps instaladas) --------------------
+
+    private fun abrirAplicacion(nombre: String): ResultadoComando {
+        if (nombre.isBlank()) return ResultadoComando(false, "¿Qué aplicación quieres abrir?")
+        val buscado = normalizar(nombre)
+
+        // Prioridad: Musicolet por paquete, aunque su nombre en pantalla cambie
+        if ("musicolet" in buscado) {
+            val intent = pm.getLaunchIntentForPackage(PAQUETE_MUSICOLET)
+                ?: return ResultadoComando(false, "Musicolet no está instalado.")
+            return lanzar(intent, "Abriendo Musicolet")
+        }
+
+        val app = buscarApp(buscado)
+            ?: return ResultadoComando(false, "No encontré una app llamada «$nombre».")
+        return lanzar(app.intent, "Abriendo ${app.etiqueta}")
+    }
+
+    private fun buscarApp(buscado: String): Candidata? {
+        fun mejor(lista: List<Entrada>): Candidata? {
+            val (entrada, puntos) = lista
+                .map { it to puntaje(buscado, it.normalizada, it.paquete) }
+                .filter { it.second > 0 }
+                .maxWithOrNull(
+                    compareBy<Pair<Entrada, Int>>({ it.second }, { -it.first.etiqueta.length })
+                ) ?: return null
+            val intent = Intent(Intent.ACTION_MAIN)
+                .addCategory(Intent.CATEGORY_LAUNCHER)
+                .setClassName(entrada.paquete, entrada.clase)
+            return Candidata(entrada.etiqueta, intent, puntos)
+        }
+        // Si no aparece, se reconstruye el índice una vez (por si instalaste una app nueva)
+        return mejor(obtenerIndice()) ?: mejor(obtenerIndice(forzar = true))
+    }
+
+    /** Qué tan bien encaja lo pedido con el nombre de una app (0 = no encaja). */
+    private fun puntaje(q: String, etiqueta: String, paquete: String): Int {
+        val qc = q.replace(" ", "")
+        val ec = etiqueta.replace(" ", "")
+        return when {
+            etiqueta == q -> 100
+            ec == qc -> 95
+            etiqueta.startsWith(q) -> 85
+            q in etiqueta -> 70
+            etiqueta.length >= 3 && etiqueta in q -> 60
+            q.split(" ").all { it in etiqueta } -> 50
+            qc.length >= 4 && qc in paquete -> 30
+            else -> 0
+        }
+    }
+
+    // --- Música (Musicolet) --------------------------------------------------------------
+
+    private fun reproducirMusica(consulta: String): ResultadoComando {
+        val abrir = pm.getLaunchIntentForPackage(PAQUETE_MUSICOLET)
+            ?: return ResultadoComando(false, "Musicolet no está instalado.")
+
+        if (consulta.isNotBlank()) {
+            val buscar = Intent(MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH)
+                .setPackage(PAQUETE_MUSICOLET)
+                .putExtra(MediaStore.EXTRA_MEDIA_FOCUS, "vnd.android.cursor.item/*")
+                .putExtra(SearchManager.QUERY, consulta)
+            if (iniciar(buscar)) {
+                return ResultadoComando(true, "Buscando «$consulta» en Musicolet")
+            }
+        }
+        return lanzar(abrir, "Musicolet abierto")
+    }
+
+    // --- Utilidades ----------------------------------------------------------------------
+
+    private fun iniciar(intent: Intent): Boolean = try {
+        appContext.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        true
+    } catch (e: Exception) {
+        false
+    }
+
+    private fun lanzar(intent: Intent, exito: String) =
+        if (iniciar(intent)) ResultadoComando(true, exito)
+        else ResultadoComando(false, "Android no me dejó abrir esa app desde segundo plano.")
+}
