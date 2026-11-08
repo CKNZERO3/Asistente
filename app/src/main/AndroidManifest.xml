@@ -20,14 +20,13 @@
     <!-- Superposición sobre otras apps: la necesitará el avatar flotante (el usuario la concede en Ajustes) -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
-    <!-- Android 11+: para poder ver si Musicolet está instalado -->
-    <queries>
-        <package android:name="in.krosbits.musicolet" />
-        <intent>
-            <action android:name="android.intent.action.MAIN" />
-            <category android:name="android.intent.category.LAUNCHER" />
-        </intent>
     
+    
+    <queries>
+       <intent>
+           <action android:name="android.intent.action.MAIN" />
+           <category android:name="android.intent.category.LAUNCHER" />
+       </intent>
     </queries>
 
     <!-- Permisos de almacenamiento y archivos -->
@@ -63,5 +62,7 @@
             android:name=".service.OverlayAvatarService"
             android:exported="false" />
     </application>
+
+    
 
 </manifest>
