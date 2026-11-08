@@ -9,6 +9,9 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -58,6 +61,8 @@ fun IrisScreen(
     userName: String? = null,
     profilePicture: Painter? = null,
     avatarEnabled: Boolean = false,
+    messages: List<ChatMessage> = emptyList(),
+    isThinking: Boolean = false,
     onAvatarChanged: (Boolean) -> Unit = {},
     onSend: (String) -> Unit = {},
     onVoice: () -> Unit = {},
@@ -128,41 +133,17 @@ fun IrisScreen(
                         .padding(horizontal = 8.dp, vertical = 6.dp)
                 )
 
-                // Contenido central limpio sin líneas divisorias
-                Column(
+                // Contenido central: bienvenida o lista de mensajes
+                Box(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth()
-                        .verticalScroll(rememberScrollState())
-                        .padding(vertical = 36.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center
                 ) {
-                    IrisLogo(modifier = Modifier.size(112.dp))
-
-                    Spacer(Modifier.height(32.dp))
-
-                    Text(
-                        text = userName?.takeIf { it.isNotBlank() }?.let { "Hola, $it." } ?: "Hola.",
-                        color = IrisMuted,
-                        fontSize = 14.sp
-                    )
-
-                    Spacer(Modifier.height(12.dp))
-
-                    Text(
-                        text = "¿Qué tienes en mente?",
-                        color = IrisWhite,
-                        fontSize = 25.sp
-                    )
-
-                    Spacer(Modifier.height(10.dp))
-
-                    Text(
-                        text = "Un espacio para tus ideas.",
-                        color = IrisMuted,
-                        fontSize = 13.sp
-                    )
+                    if (messages.isEmpty()) {
+                        IrisWelcome(userName)
+                    } else {
+                        IrisChatList(messages, isThinking)
+                    }
                 }
 
                 // Barra flotante inferior tipo píldora
@@ -425,6 +406,85 @@ private fun DrawerAction(title: String, subtitle: String, icon: ImageVector, mod
         Column {
             Text(title, color = IrisWhite, fontSize = 13.sp)
             Text(subtitle, color = IrisMuted, fontSize = 9.sp)
+        }
+    }
+}
+
+@Composable
+private fun IrisWelcome(userName: String?) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(vertical = 36.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        IrisLogo(modifier = Modifier.size(112.dp))
+        Spacer(Modifier.height(32.dp))
+        Text(
+            text = userName?.takeIf { it.isNotBlank() }?.let { "Hola, $it." } ?: "Hola.",
+            color = IrisMuted,
+            fontSize = 14.sp
+        )
+        Spacer(Modifier.height(12.dp))
+        Text("¿Qué tienes en mente?", color = IrisWhite, fontSize = 25.sp)
+        Spacer(Modifier.height(10.dp))
+        Text("Un espacio para tus ideas.", color = IrisMuted, fontSize = 13.sp)
+    }
+}
+
+@Composable
+private fun IrisChatList(messages: List<ChatMessage>, isThinking: Boolean) {
+    val listState = rememberLazyListState()
+    val total = messages.size + if (isThinking) 1 else 0
+
+    LaunchedEffect(total) {
+        if (total > 0) listState.animateScrollToItem(total - 1)
+    }
+
+    LazyColumn(
+        state = listState,
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        items(messages, key = { it.id }) { message ->
+            ChatBubble(message.text, message.fromUser)
+        }
+        if (isThinking) {
+            item(key = "thinking") {
+                ChatBubble("Iris está pensando…", fromUser = false, muted = true)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ChatBubble(text: String, fromUser: Boolean, muted: Boolean = false) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = if (fromUser) Arrangement.End else Arrangement.Start
+    ) {
+        Box(
+            modifier = Modifier
+                .widthIn(max = 300.dp)
+                .clip(
+                    RoundedCornerShape(
+                        topStart = 20.dp,
+                        topEnd = 20.dp,
+                        bottomStart = if (fromUser) 20.dp else 6.dp,
+                        bottomEnd = if (fromUser) 6.dp else 20.dp
+                    )
+                )
+                .background(if (fromUser) IrisAccentGradient else SolidColor(Color(0xFF292342)))
+                .padding(horizontal = 14.dp, vertical = 10.dp)
+        ) {
+            Text(
+                text = text,
+                color = if (muted) IrisMuted else IrisWhite,
+                fontSize = 14.sp
+            )
         }
     }
 }
