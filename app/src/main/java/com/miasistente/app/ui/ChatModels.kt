@@ -28,7 +28,7 @@ class ChatViewModel : ViewModel() {
         messages.add(ChatMessage(nextId++, text, fromUser = false))
     }
 
-    fun setThinking(value: Boolean) {
+    fun updateThinking(value: Boolean) {
         isThinking = value
     }
 
