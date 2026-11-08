@@ -1,9 +1,13 @@
 package com.miasistente.app
 
+import android.Manifest
 import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.provider.OpenableColumns
 import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -14,6 +18,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalView
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
+import androidx.core.view.WindowCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
@@ -22,27 +30,62 @@ import com.miasistente.app.comandos.ProcesadorComandos
 import com.miasistente.app.dominio.AssistantState
 import com.miasistente.app.service.AsistenteService
 import com.miasistente.app.ui.AsistenteTema
+import com.miasistente.app.ui.ChatAttachment
 import com.miasistente.app.ui.ChatViewModel
 import com.miasistente.app.ui.IrisScreen
+import com.miasistente.app.ui.PermissionKind
+import com.miasistente.app.ui.PermissionPrompt
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
+
     private lateinit var procesador: ProcesadorComandos
     private val chat: ChatViewModel by viewModels()
+    private val prefs by lazy { getSharedPreferences("iris_prefs", MODE_PRIVATE) }
+
+    // Estado de la interfaz que vive en la actividad
+    private var userName by mutableStateOf<String?>(null)
+    private var userPhoto by mutableStateOf<String?>(null)
+    private var avatarEnabled by mutableStateOf(false)
+    private var darkTheme by mutableStateOf(true)
+    private var permissionPrompt by mutableStateOf<PermissionPrompt?>(null)
 
     private val pickFile = registerForActivityResult(
         ActivityResultContracts.GetContent()
     ) { uri ->
-        if (uri != null) chat.addUser("📎 Archivo adjunto")
+        if (uri != null) agregarAdjunto(uri)
+    }
+
+    private val pedirPermisosVoz = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) {
+        if (tienePermisoMicrofono()) {
+            activarMicrofono()
+        } else {
+            aviso("Necesito el permiso del micrófono para escucharte")
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Pantalla completa real: evita que el teclado "empuje" toda la ventana
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+
         procesador = ProcesadorComandos(this)
-        AsistenteService.start(this)
+
+        // Restaurar preferencias
+        darkTheme = prefs.getBoolean("dark_theme", true)
+        userName = prefs.getString("user_name", null)
+        userPhoto = prefs.getString("user_photo", null)
+
+        // Solo reanuda la escucha si el usuario la había activado y ya hay permiso
+        if (prefs.getBoolean("mic_enabled", false) && tienePermisoMicrofono()) {
+            AsistenteService.start(this)
+        }
 
         // Construye el índice de apps en segundo plano
         lifecycleScope.launch(Dispatchers.Default) {
@@ -63,22 +106,49 @@ class MainActivity : ComponentActivity() {
             AsistenteTema {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     val isServiceRunning by AsistenteService.isRunning.collectAsState()
+                    val audio by AsistenteService.estadoAudio.collectAsState()
 
-                    var userName by remember { mutableStateOf<String?>(null) }
-                    var avatarEnabled by remember { mutableStateOf(false) }
+                    // Iconos de la barra de estado legibles en modo claro y oscuro
+                    val view = LocalView.current
+                    SideEffect {
+                        val controller = WindowCompat.getInsetsController(window, view)
+                        controller.isAppearanceLightStatusBars = !darkTheme
+                        controller.isAppearanceLightNavigationBars = !darkTheme
+                    }
+
+                    // Si el servicio de voz falla, se le avisa al usuario
+                    LaunchedEffect(audio.error) {
+                        audio.error?.let { aviso(it) }
+                    }
+
+                    val voiceStatus: String? = when {
+                        audio.preparandoModelo ->
+                            if (audio.progresoModelo >= 0) "Descargando modelo de voz… ${audio.progresoModelo}%"
+                            else "Preparando voz…"
+                        isServiceRunning && audio.capturando ->
+                            if (audio.hayVoz || audio.palabraClave.isBlank()) "Escuchando…"
+                            else "Di «${audio.palabraClave}» y tu comando"
+                        isServiceRunning -> "Activando micrófono…"
+                        else -> null
+                    }
 
                     IrisScreen(
                         userName = userName,
-                        profilePicture = null,
+                        profilePhoto = userPhoto,
                         avatarEnabled = avatarEnabled,
+                        darkTheme = darkTheme,
+                        onDarkThemeChange = { cambiarTema(it) },
                         messages = chat.messages,
                         isThinking = chat.isThinking,
+                        micActive = isServiceRunning,
+                        micPulse = isServiceRunning && audio.hayVoz,
+                        voiceStatus = voiceStatus,
+                        permissionPrompt = permissionPrompt,
+                        onPermissionConfirm = { confirmarPermiso() },
+                        onPermissionDismiss = { permissionPrompt = null },
                         onAvatarChanged = { avatarEnabled = it },
                         onSend = { enviar(it) },
-                        onVoice = {
-                            if (isServiceRunning) AsistenteService.stop(this@MainActivity)
-                            else AsistenteService.start(this@MainActivity)
-                        },
+                        onVoice = { alternarMicrofono(isServiceRunning) },
                         onAttach = { pickFile.launch("*/*") },
                         onAction = { destination -> manejarAccion(destination) }
                     )
@@ -86,6 +156,10 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    // ---------------------------------------------------------------------------------
+    // Chat
+    // ---------------------------------------------------------------------------------
 
     private fun enviar(texto: String) {
         chat.addUser(texto)
@@ -107,17 +181,114 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun agregarAdjunto(uri: Uri) {
+        lifecycleScope.launch {
+            val adjunto = withContext(Dispatchers.IO) { leerAdjunto(uri) }
+            chat.addAttachment(adjunto)
+        }
+    }
+
+    private fun leerAdjunto(uri: Uri): ChatAttachment {
+        val mime = contentResolver.getType(uri)
+        var nombre = uri.lastPathSegment ?: "archivo"
+        var tamano: Long? = null
+        try {
+            contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val iNombre = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    if (iNombre >= 0) cursor.getString(iNombre)?.let { nombre = it }
+                    val iTamano = cursor.getColumnIndex(OpenableColumns.SIZE)
+                    if (iTamano >= 0 && !cursor.isNull(iTamano)) tamano = cursor.getLong(iTamano)
+                }
+            }
+        } catch (e: Exception) {
+            // Si no se puede leer el nombre, se usa el valor por defecto
+        }
+        return ChatAttachment(uri.toString(), nombre, mime, tamano)
+    }
+
+    // ---------------------------------------------------------------------------------
+    // Micrófono
+    // ---------------------------------------------------------------------------------
+
+    private fun tienePermisoMicrofono(): Boolean =
+        ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
+            PackageManager.PERMISSION_GRANTED
+
+    private fun alternarMicrofono(activo: Boolean) {
+        if (activo) {
+            prefs.edit().putBoolean("mic_enabled", false).apply()
+            AsistenteService.stop(this)
+            return
+        }
+        if (tienePermisoMicrofono()) {
+            activarMicrofono()
+            return
+        }
+        // Primero se explica en una tarjeta discreta; el permiso del sistema solo se pide
+        // si el usuario acepta. Si Android ya no deja preguntar, se ofrece abrir los ajustes.
+        val bloqueado = prefs.getBoolean("mic_asked", false) &&
+            !ActivityCompat.shouldShowRequestPermissionRationale(this, Manifest.permission.RECORD_AUDIO)
+        permissionPrompt = PermissionPrompt(PermissionKind.MICROPHONE, goToSettings = bloqueado)
+    }
+
+    private fun confirmarPermiso() {
+        val prompt = permissionPrompt ?: return
+        permissionPrompt = null
+        if (prompt.goToSettings) {
+            abrirAjustesDeLaApp()
+            return
+        }
+        prefs.edit().putBoolean("mic_asked", true).apply()
+        val permisos = arrayListOf(Manifest.permission.RECORD_AUDIO)
+        if (Build.VERSION.SDK_INT >= 33) permisos.add("android.permission.POST_NOTIFICATIONS")
+        pedirPermisosVoz.launch(permisos.toTypedArray())
+    }
+
+    private fun activarMicrofono() {
+        prefs.edit().putBoolean("mic_enabled", true).apply()
+        AsistenteService.start(this)
+    }
+
+    // ---------------------------------------------------------------------------------
+    // Tema y sesión
+    // ---------------------------------------------------------------------------------
+
+    private fun cambiarTema(oscuro: Boolean) {
+        darkTheme = oscuro
+        prefs.edit().putBoolean("dark_theme", oscuro).apply()
+    }
+
+    /**
+     * Llama a esta función cuando tu proveedor de inicio de sesión (Google, Firebase, etc.)
+     * devuelva al usuario. El menú cambia solo: botón de "Iniciar sesión" → foto + nombre.
+     */
+    fun completarInicioSesion(nombre: String, fotoUrl: String?) {
+        userName = nombre
+        userPhoto = fotoUrl
+        prefs.edit().putString("user_name", nombre).putString("user_photo", fotoUrl).apply()
+    }
+
+    private fun cerrarSesion() {
+        userName = null
+        userPhoto = null
+        prefs.edit().remove("user_name").remove("user_photo").apply()
+    }
+
+    // ---------------------------------------------------------------------------------
+    // Acciones del menú y de Ajustes
+    // (ajustes, about, privacy y account las resuelve la propia IrisScreen)
+    // ---------------------------------------------------------------------------------
+
     private fun manejarAccion(destination: String) {
         when (destination) {
             "new_chat" -> chat.clear()
-            "permissions", "settings" -> abrirAjustesDeLaApp()
+            "permissions" -> abrirAjustesDeLaApp()
             "support" -> enviarCorreoSoporte()
-            "sign_in" -> aviso("Inicio de sesión próximamente")
+            "sign_out" -> cerrarSesion()
+            "sign_in" -> aviso("Conecta tu proveedor de inicio de sesión y llama a completarInicioSesion()")
             "search" -> aviso("Búsqueda próximamente")
             "gallery" -> aviso("Galería próximamente")
-            "about" -> aviso("Iris — tu asistente personal")
-            "privacy" -> aviso("Privacidad y datos próximamente")
-            "account" -> aviso("Cuenta próximamente")
         }
     }
 
