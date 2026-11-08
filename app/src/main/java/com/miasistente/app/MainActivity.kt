@@ -89,7 +89,7 @@ class MainActivity : ComponentActivity() {
 
     private fun enviar(texto: String) {
         chat.addUser(texto)
-        chat.setThinking(true)
+        chat.updateThinking(true)
 
         lifecycleScope.launch {
             AsistenteService.updateAssistantState(AssistantState.THINKING)
@@ -101,7 +101,7 @@ class MainActivity : ComponentActivity() {
             } catch (e: Exception) {
                 chat.addAssistant("No pude completar eso: ${e.message ?: "error desconocido"}")
             } finally {
-                chat.setThinking(false)
+                chat.updateThinking(false)
                 AsistenteService.updateAssistantState(AssistantState.IDLE)
             }
         }
