@@ -301,19 +301,3 @@ private fun DrawScope.drawParticles(t: Float, color: Color) {
 }
 
 private fun lerpF(a: Float, b: Float, t: Float) = a + (b - a) * t
-
-// ---------- Ejemplo de uso con fondo que cambia con la transición ----------
-
-// ---------- @Composable
-fun DayNightTogglePreview() {
-    var isNight by rememberSaveable { mutableStateOf(false) }
-    val bg by animateColorAsState(
-        if (isNight) Color(0xFF0B0820) else Color(0xFFF3F1FA), tween(500), label = "bg"
-    )
-    Box(Modifier.fillMaxSize().background(bg), contentAlignment = Alignment.Center) {
-        DayNightToggle(isNight = isNight, onToggle = { isNight = it })
-    }
-}  ----------
-
-
-
