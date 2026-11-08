@@ -330,6 +330,37 @@ private fun IrisMain(
             onAttach = onAttach,
             onVoice = onVoice,
             onSend = onSend
+            
+        MicButton(active = micActive, pulsing = micPulse, onClick = emailOrVoiceToggle@{
+            onVoice()
+        })
+
+        // El botón de enviar solo aparece si el micrófono NO está activo y hay texto, o condicionado a tu gusto
+        AnimatedVisibility(
+            visible = !micActive,
+            enter = fadeIn() + slideInHorizontally { it / 2 },
+            exit = fadeOut() + slideOutHorizontally { it / 2 }
+        ) {
+            Row {
+                Spacer(Modifier.width(2.dp))
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .graphicsLayer { alpha = if (value.isBlank()) 0.55f else 1f }
+                        .clip(CircleShape)
+                        .background(IrisAccentGradient)
+                        .clickable(role = Role.Button, onClickLabel = "Enviar", onClick = onSend),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.Default.ArrowUpward,
+                        contentDescription = "Enviar",
+                        tint = Color.White,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+            }
+        }
         )
 
         Spacer(Modifier.height(18.dp))
