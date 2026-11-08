@@ -102,6 +102,9 @@ class AsistenteService : Service() {
     @Volatile private var motor: WakeWordEngine? = null
     @Volatile private var destruido = false
     private val detector = VoiceDetector()
+    private val procesador by lazy {
+        com.miasistente.app.comandos.ProcesadorComandos(applicationContext)
+    }
 
     private var ultimaActualizacionUi = 0L
     private var contadorActivaciones = 0
@@ -271,7 +274,6 @@ class AsistenteService : Service() {
 
         scope.launch {
             try {
-                val procesador = com.miasistente.app.comandos.ProcesadorComandos(applicationContext)
                 val resultado = procesador.procesar(texto)
 
                 _eventosComando.emit(EventoComandoVoz(comandoUsuario = texto, respuesta = resultado.mensaje))
