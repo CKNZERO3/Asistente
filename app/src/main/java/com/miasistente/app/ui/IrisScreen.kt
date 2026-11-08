@@ -16,8 +16,8 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -38,8 +38,8 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.SolidColor
@@ -50,6 +50,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.graphics.PathParser
@@ -63,6 +64,7 @@ private val SwitchTrackOffLight = Color(0xFFD9D1EE)
 fun IrisScreen(
     userName: String? = null,
     profilePhoto: String? = null,
+    userEmail: String? = null,
     avatarEnabled: Boolean = false,
     darkTheme: Boolean = true,
     onDarkThemeChange: (Boolean) -> Unit = {},
@@ -137,6 +139,7 @@ fun IrisScreen(
                             IrisDrawer(
                                 userName = userName,
                                 profilePhoto = profilePhoto,
+                                userEmail = userEmail,
                                 avatarEnabled = avatarEnabled,
                                 onAvatarChanged = onAvatarChanged,
                                 onAction = ::navigate
@@ -249,10 +252,6 @@ private fun InfoDialog(title: String, text: String, onDismiss: () -> Unit) {
         }
     )
 }
-
-// ---------------------------------------------------------------------------------------
-// Pantalla principal
-// ---------------------------------------------------------------------------------------
 
 @Composable
 private fun IrisMain(
@@ -443,10 +442,6 @@ private fun ChatBubble(
     }
 }
 
-// ---------------------------------------------------------------------------------------
-// Barra inferior
-// ---------------------------------------------------------------------------------------
-
 @Composable
 private fun IrisComposer(
     value: String,
@@ -494,30 +489,23 @@ private fun IrisComposer(
 
         MicButton(active = micActive, pulsing = micPulse, onClick = onVoice)
 
-        AnimatedVisibility(
-            visible = !micActive,
-            enter = fadeIn() + slideInHorizontally { it / 2 },
-            exit = fadeOut() + slideOutHorizontally { it / 2 }
+        Spacer(Modifier.width(2.dp))
+
+        Box(
+            modifier = Modifier
+                .size(44.dp)
+                .graphicsLayer { alpha = if (value.isBlank()) 0.55f else 1f }
+                .clip(CircleShape)
+                .background(IrisAccentGradient)
+                .clickable(role = Role.Button, onClickLabel = "Enviar", onClick = onSend),
+            contentAlignment = Alignment.Center
         ) {
-            Row {
-                Spacer(Modifier.width(2.dp))
-                Box(
-                    modifier = Modifier
-                        .size(44.dp)
-                        .graphicsLayer { alpha = if (value.isBlank()) 0.55f else 1f }
-                        .clip(CircleShape)
-                        .background(IrisAccentGradient)
-                        .clickable(role = Role.Button, onClickLabel = "Enviar", onClick = onSend),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        Icons.Default.ArrowUpward,
-                        contentDescription = "Enviar",
-                        tint = Color.White,
-                        modifier = Modifier.size(22.dp)
-                    )
-                }
-            }
+            Icon(
+                Icons.Default.ArrowUpward,
+                contentDescription = "Enviar",
+                tint = Color.White,
+                modifier = Modifier.size(22.dp)
+            )
         }
     }
 }
@@ -559,14 +547,11 @@ private fun MicButton(active: Boolean, pulsing: Boolean, onClick: () -> Unit) {
     }
 }
 
-// ---------------------------------------------------------------------------------------
-// Menú lateral
-// ---------------------------------------------------------------------------------------
-
 @Composable
 private fun IrisDrawer(
     userName: String?,
     profilePhoto: String?,
+    userEmail: String?,
     avatarEnabled: Boolean,
     onAvatarChanged: (Boolean) -> Unit,
     onAction: (String) -> Unit
@@ -645,7 +630,13 @@ private fun IrisDrawer(
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
                         Text(userName, color = p.text)
-                        Text("Tu espacio personal", color = p.muted, fontSize = 12.sp)
+                        Text(
+                            userEmail ?: "Tu espacio personal",
+                            color = p.muted,
+                            fontSize = 12.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
                     Icon(Icons.Default.ExpandMore, contentDescription = null, tint = p.muted)
                 }
