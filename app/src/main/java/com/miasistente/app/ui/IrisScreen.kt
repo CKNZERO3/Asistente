@@ -16,8 +16,8 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -38,8 +38,8 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.SolidColor
@@ -87,7 +87,6 @@ fun IrisScreen(
     var showSettings by rememberSaveable { mutableStateOf(false) }
     var dialog by rememberSaveable { mutableStateOf<String?>(null) }
 
-    // Acciones que resuelve la propia pantalla; el resto se delega a MainActivity
     fun handle(action: String) {
         when (action) {
             "settings" -> showSettings = true
@@ -180,7 +179,6 @@ fun IrisScreen(
                     )
                 }
 
-                // Tarjeta discreta de permisos: solo aparece cuando el usuario usa una función que la necesita
                 var lastPrompt by remember { mutableStateOf<PermissionPrompt?>(null) }
                 SideEffect { if (permissionPrompt != null) lastPrompt = permissionPrompt }
                 val shownPrompt = permissionPrompt ?: lastPrompt
@@ -293,7 +291,6 @@ private fun IrisMain(
                 .padding(horizontal = 8.dp, vertical = 6.dp)
         )
 
-        // clipToBounds: el chat nunca se dibuja encima del título ni de la barra de estado
         Box(
             modifier = Modifier
                 .weight(1f)
@@ -330,37 +327,6 @@ private fun IrisMain(
             onAttach = onAttach,
             onVoice = onVoice,
             onSend = onSend
-            
-        MicButton(active = micActive, pulsing = micPulse, onClick = emailOrVoiceToggle@{
-            onVoice()
-        })
-
-        // El botón de enviar solo aparece si el micrófono NO está activo y hay texto, o condicionado a tu gusto
-        AnimatedVisibility(
-            visible = !micActive,
-            enter = fadeIn() + slideInHorizontally { it / 2 },
-            exit = fadeOut() + slideOutHorizontally { it / 2 }
-        ) {
-            Row {
-                Spacer(Modifier.width(2.dp))
-                Box(
-                    modifier = Modifier
-                        .size(44.dp)
-                        .graphicsLayer { alpha = if (value.isBlank()) 0.55f else 1f }
-                        .clip(CircleShape)
-                        .background(IrisAccentGradient)
-                        .clickable(role = Role.Button, onClickLabel = "Enviar", onClick = onSend),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        Icons.Default.ArrowUpward,
-                        contentDescription = "Enviar",
-                        tint = Color.White,
-                        modifier = Modifier.size(22.dp)
-                    )
-                }
-            }
-        }
         )
 
         Spacer(Modifier.height(18.dp))
@@ -398,7 +364,6 @@ private fun IrisChatList(messages: List<ChatMessage>, isThinking: Boolean) {
     val total = messages.size + if (isThinking) 1 else 0
     val imeOpen = WindowInsets.ime.getBottom(LocalDensity.current) > 0
 
-    // Baja al último mensaje al recibir uno nuevo y al abrir/cerrar el teclado
     LaunchedEffect(total, imeOpen) {
         if (total > 0) listState.animateScrollToItem(total - 1)
     }
@@ -529,23 +494,30 @@ private fun IrisComposer(
 
         MicButton(active = micActive, pulsing = micPulse, onClick = onVoice)
 
-        Spacer(Modifier.width(2.dp))
-
-        Box(
-            modifier = Modifier
-                .size(44.dp)
-                .graphicsLayer { alpha = if (value.isBlank()) 0.55f else 1f }
-                .clip(CircleShape)
-                .background(IrisAccentGradient)
-                .clickable(role = Role.Button, onClickLabel = "Enviar", onClick = onSend),
-            contentAlignment = Alignment.Center
+        AnimatedVisibility(
+            visible = !micActive,
+            enter = fadeIn() + slideInHorizontally { it / 2 },
+            exit = fadeOut() + slideOutHorizontally { it / 2 }
         ) {
-            Icon(
-                Icons.Default.ArrowUpward,
-                contentDescription = "Enviar",
-                tint = Color.White,
-                modifier = Modifier.size(22.dp)
-            )
+            Row {
+                Spacer(Modifier.width(2.dp))
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .graphicsLayer { alpha = if (value.isBlank()) 0.55f else 1f }
+                        .clip(CircleShape)
+                        .background(IrisAccentGradient)
+                        .clickable(role = Role.Button, onClickLabel = "Enviar", onClick = onSend),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.Default.ArrowUpward,
+                        contentDescription = "Enviar",
+                        tint = Color.White,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+            }
         }
     }
 }
@@ -588,7 +560,7 @@ private fun MicButton(active: Boolean, pulsing: Boolean, onClick: () -> Unit) {
 }
 
 // ---------------------------------------------------------------------------------------
-// Menú lateral: solo accesos principales; lo demás vive en Ajustes
+// Menú lateral
 // ---------------------------------------------------------------------------------------
 
 @Composable
@@ -623,7 +595,6 @@ private fun IrisDrawer(
 
             Spacer(Modifier.height(24.dp))
 
-            // Dinámico: botón de inicio de sesión → foto y nombre del usuario
             if (userName.isNullOrBlank()) {
                 Row(
                     modifier = Modifier
@@ -786,10 +757,6 @@ private fun DrawerAction(
     }
 }
 
-/**
- * Logo oficial de Iris: silueta moderna de línea de la gatita con el prisma tetraedro
- * minúsculo y el haz de luz refractado en arcoíris.
- */
 @Composable
 fun IrisLogo(modifier: Modifier = Modifier) {
     val image = remember { renderIrisLogoWithPrism() }
