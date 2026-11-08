@@ -82,8 +82,14 @@ fun IrisSettingsScreen(
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp, vertical = 8.dp)
         ) {
+            
             SettingsSection("Apariencia")
-            SettingsCard {
+            SettingsCard(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(20.dp))
+                    .clickable { onDarkThemeChange(!darkTheme) }
+            ) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
