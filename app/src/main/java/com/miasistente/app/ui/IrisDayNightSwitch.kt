@@ -9,9 +9,9 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
@@ -38,6 +38,8 @@ import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -54,7 +56,6 @@ private val SwNightGlow = Color(0xFFA78BFA)
 private val SwSun = Color(0xFFF59E0B)
 private val SwMoon = Color(0xFFE9E3FF)
 
-/** Interruptor día/noche. isNight = true → modo oscuro. */
 @Composable
 fun IrisDayNightSwitch(
     isNight: Boolean,
@@ -88,10 +89,10 @@ fun IrisDayNightSwitch(
     )
     val glowColor = lerp(SwDayGlow, SwNightGlow, p)
 
-    val travel = trackWidth - thumbSize - padding * 2
-    val stretch = 1f + 0.14f * sin(PI.toFloat() * p)
+    val density = LocalDensity.current
+    val travelPx = with(density) { (trackWidth - thumbSize - padding * 2).toPx() }
 
-    Box(
+    BoxWithConstraints(
         modifier = modifier
             .size(trackWidth, trackHeight)
             .clip(RoundedCornerShape(trackHeight / 2))
@@ -106,14 +107,32 @@ fun IrisDayNightSwitch(
                 ),
                 RoundedCornerShape(trackHeight / 2)
             )
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null
-            ) {
-                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                onToggle(!isNight)
+            .pointerInput(isNight) {
+                detectHorizontalDragGestures(
+                    onDragEnd = {
+                        // Si pasó la mitad del recorrido, cambia de estado
+                        if (progress > 0.5f != isNight) {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onToggle(!isNight)
+                        }
+                    }
+                ) { change, dragAmount ->
+                    change.consume()
+                    // Aquí podrías manejar un estado local de arrastre si deseas fluidez extrema, 
+                    // pero con el spring actual el toque y arrastre se comportan natural.
+                    if (travelPx > 0) {
+                        val newProgress = (progress + (dragAmount / travelPx)).coerceIn(0f, 1f)
+                        if (newProgress > 0.5f != isNight && (newProgress == 1f || newProgress == 0f)) {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onToggle(newProgress > 0.5f)
+                        }
+                    }
+                }
             }
     ) {
+        val travel = trackWidth - thumbSize - padding * 2
+        val stretch = 1f + 0.14f * sin(PI.toFloat() * p)
+
         Canvas(Modifier.fillMaxSize()) {
             drawRoundRect(
                 brush = Brush.verticalGradient(
