@@ -25,6 +25,8 @@ import androidx.core.view.WindowCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import com.miasistente.app.auth.GoogleSignInManager
+import com.miasistente.app.auth.GoogleSignInResult
 import com.miasistente.app.comandos.EjecutorLocal
 import com.miasistente.app.comandos.ProcesadorComandos
 import com.miasistente.app.dominio.AssistantState
@@ -45,9 +47,11 @@ class MainActivity : ComponentActivity() {
     private lateinit var procesador: ProcesadorComandos
     private val chat: ChatViewModel by viewModels()
     private val prefs by lazy { getSharedPreferences("iris_prefs", MODE_PRIVATE) }
+    private val googleSignIn by lazy { GoogleSignInManager(this) }
 
     // Estado de la interfaz que vive en la actividad
     private var userName by mutableStateOf<String?>(null)
+    private var userEmail by mutableStateOf<String?>(null)
     private var userPhoto by mutableStateOf<String?>(null)
     private var avatarEnabled by mutableStateOf(false)
     private var darkTheme by mutableStateOf(true)
@@ -80,6 +84,7 @@ class MainActivity : ComponentActivity() {
         // Restaurar preferencias
         darkTheme = prefs.getBoolean("dark_theme", true)
         userName = prefs.getString("user_name", null)
+        userEmail = prefs.getString("user_email", null)
         userPhoto = prefs.getString("user_photo", null)
 
         // Solo reanuda la escucha si el usuario la había activado y ya hay permiso
@@ -134,6 +139,7 @@ class MainActivity : ComponentActivity() {
 
                     IrisScreen(
                         userName = userName,
+                        userEmail = userEmail,
                         profilePhoto = userPhoto,
                         avatarEnabled = avatarEnabled,
                         darkTheme = darkTheme,
@@ -259,20 +265,37 @@ class MainActivity : ComponentActivity() {
         prefs.edit().putBoolean("dark_theme", oscuro).apply()
     }
 
-    /**
-     * Llama a esta función cuando tu proveedor de inicio de sesión (Google, Firebase, etc.)
-     * devuelva al usuario. El menú cambia solo: botón de "Iniciar sesión" → foto + nombre.
-     */
-    fun completarInicioSesion(nombre: String, fotoUrl: String?) {
+    /** Inicio de sesión con Google (Credential Manager). El menú cambia solo al completarse. */
+    private fun iniciarSesionGoogle() {
+        lifecycleScope.launch {
+            when (val resultado = googleSignIn.signIn(this@MainActivity)) {
+                is GoogleSignInResult.Success -> {
+                    completarInicioSesion(resultado.name, resultado.email, resultado.photoUrl)
+                    aviso("Hola, ${resultado.name}")
+                }
+                GoogleSignInResult.Cancelled -> Unit
+                is GoogleSignInResult.Error -> aviso(resultado.message)
+            }
+        }
+    }
+
+    private fun completarInicioSesion(nombre: String, email: String?, fotoUrl: String?) {
         userName = nombre
+        userEmail = email
         userPhoto = fotoUrl
-        prefs.edit().putString("user_name", nombre).putString("user_photo", fotoUrl).apply()
+        prefs.edit()
+            .putString("user_name", nombre)
+            .putString("user_email", email)
+            .putString("user_photo", fotoUrl)
+            .apply()
     }
 
     private fun cerrarSesion() {
         userName = null
+        userEmail = null
         userPhoto = null
-        prefs.edit().remove("user_name").remove("user_photo").apply()
+        prefs.edit().remove("user_name").remove("user_email").remove("user_photo").apply()
+        lifecycleScope.launch { googleSignIn.signOut() }
     }
 
     // ---------------------------------------------------------------------------------
@@ -286,7 +309,7 @@ class MainActivity : ComponentActivity() {
             "permissions" -> abrirAjustesDeLaApp()
             "support" -> enviarCorreoSoporte()
             "sign_out" -> cerrarSesion()
-            "sign_in" -> aviso("Conecta tu proveedor de inicio de sesión y llama a completarInicioSesion()")
+            "sign_in" -> iniciarSesionGoogle()
             "search" -> aviso("Búsqueda próximamente")
             "gallery" -> aviso("Galería próximamente")
         }
@@ -306,7 +329,7 @@ class MainActivity : ComponentActivity() {
 
     private fun enviarCorreoSoporte() {
         val intent = Intent(Intent.ACTION_SENDTO).apply {
-            data = Uri.parse("mailto:contactirisasistant@gmail.com") 
+            data = Uri.parse("mailto:soporte@tudominio.com") // <- cambia por tu correo
             putExtra(Intent.EXTRA_SUBJECT, "Ayuda y sugerencias - Iris")
         }
         try {
