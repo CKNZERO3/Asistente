@@ -1,0 +1,118 @@
+name: Release firmada
+
+# Se ejecuta al subir una etiqueta con formato vX.Y.Z (por ejemplo v0.4.0).
+# Compila el APK de release firmado con la clave fija y lo publica en GitHub Releases.
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+permissions:
+  contents: write # necesario para crear la release
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Descargar el código
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Calcular versión
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          VERSION="${TAG#v}"
+          echo "VERSION_NAME=$VERSION" >> "$GITHUB_ENV"
+          # Mismo criterio que build.yml: número de commits (siempre crece)
+          echo "VERSION_CODE=$(git rev-list --count HEAD)" >> "$GITHUB_ENV"
+          echo "Publicando Iris $VERSION"
+
+      - name: Preparar la clave de firma
+        env:
+          KEYSTORE_B64: ${{ secrets.RELEASE_KEYSTORE_B64 }}
+        run: |
+          if [ -z "$KEYSTORE_B64" ]; then
+            echo "::error::Falta el secreto RELEASE_KEYSTORE_B64 (Settings > Secrets and variables > Actions)."
+            exit 1
+          fi
+          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/iris.jks"
+          echo "RELEASE_KEYSTORE_PATH=$RUNNER_TEMP/iris.jks" >> "$GITHUB_ENV"
+
+      - name: Instalar Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Preparar Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.10.2"
+
+      - name: Aceptar licencias del SDK
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses || true
+
+      - name: Ejecutar pruebas unitarias
+        run: gradle :app:testDebugUnitTest --stacktrace
+
+      - name: Compilar APK de release firmado
+        env:
+          RELEASE_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        run: gradle :app:assembleRelease --stacktrace
+
+      - name: Verificar firma y librerías nativas
+        run: |
+          APK=app/build/outputs/apk/release/app-release.apk
+          if [ ! -f "$APK" ]; then
+            echo "::error::No se generó app-release.apk (revisa que los 4 secretos de firma estén bien)."
+            exit 1
+          fi
+
+          # Huellas de la firma: SHA-1 es la que se registra en Google Cloud para el login con Google
+          BT="$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
+          "$BT/apksigner" verify --print-certs "$APK" | grep -E "certificate SHA-(1|256) digest"
+
+          # Google Play exige que las librerías nativas (.so) estén alineadas a 16 KB.
+          # Solo avisa (::warning::), no detiene la release.
+          mkdir -p "$RUNNER_TEMP/so"
+          unzip -o -q "$APK" 'lib/arm64-v8a/*.so' -d "$RUNNER_TEMP/so" || true
+          for f in "$RUNNER_TEMP"/so/lib/arm64-v8a/*.so; do
+            [ -e "$f" ] || continue
+            for a in $(readelf -lW "$f" | awk '$1=="LOAD"{print $NF}' | sort -u); do
+              if [ $((a)) -lt 16384 ]; then
+                echo "::warning::$(basename "$f") no está alineada a 16 KB (align=$a)"
+              fi
+            done
+            echo "$(basename "$f"): revisada"
+          done
+
+      - name: Preparar archivos
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/release/app-release.apk dist/Iris.apk
+          (cd dist && sha256sum Iris.apk > Iris.apk.sha256 && cat Iris.apk.sha256)
+
+      - name: Publicar en GitHub Releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          # Si la release ya existe (por ejemplo, la creaste desde la web de GitHub al
+          # elegir la etiqueta), solo se le adjuntan los archivos; si no, se crea.
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" dist/Iris.apk dist/Iris.apk.sha256 --clobber
+          else
+            gh release create "$TAG" dist/Iris.apk dist/Iris.apk.sha256 \
+              --title "Iris $TAG" --generate-notes
+          fi
