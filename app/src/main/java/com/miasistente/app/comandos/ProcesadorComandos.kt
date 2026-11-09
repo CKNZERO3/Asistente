@@ -46,7 +46,7 @@ class ProcesadorComandos(context: Context) {
         val norm = normalizar(original)
         val p = normalizar(palabra)
         if (p.isEmpty()) return original
-        val m = Regex("""^(?:(?:oye|hey|ok)\s+)?${Regex.escape(p)}\b[\s,.:;!?-]*""").find(norm)
+        val m = Regex("""^(?:(?:oye|hey|ok|mira)\s+)?${Regex.escape(p)}\b[\s,.:;!?-]*""").find(norm)
             ?: return original
         return (if (original.length == norm.length) original else norm).substring(m.value.length)
     }
@@ -58,7 +58,7 @@ class ProcesadorComandos(context: Context) {
                     Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 )
             } catch (e: Exception) {
-                // Sin pantalla de ajustes disponible
+                // Ignorar
             }
             return ResultadoComando(false, "Activa el servicio de accesibilidad de Iris para poder leer la pantalla.")
         }
