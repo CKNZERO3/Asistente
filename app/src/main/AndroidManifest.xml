@@ -2,26 +2,14 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- Internet: para hablar con la API de Gemini y descargar el modelo de voz -->
     <uses-permission android:name="android.permission.INTERNET" />
-    <!-- Saber si hay conexión antes de llamar a Gemini -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-
-    <!-- Micrófono: escuchar la palabra de activación y tus comandos -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
-
-    <!-- Servicio en primer plano. Desde Android 14 hay que declarar también su tipo (micrófono) -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
-
-    <!-- Mostrar la notificación persistente (Android 13+ la pide en tiempo de ejecución) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-
-    <!-- Superposición sobre otras apps: la necesitará el avatar flotante (el usuario la concede en Ajustes) -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
-    
-    
     <queries>
        <intent>
            <action android:name="android.intent.action.MAIN" />
@@ -29,7 +17,6 @@
        </intent>
     </queries>
 
-    <!-- Permisos de almacenamiento y archivos -->
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" tools:ignore="ScopedStorage" />
@@ -42,7 +29,6 @@
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.NoActionBar">
 
-        <!-- Pantalla principal -->
         <activity
             android:name=".MainActivity"
             android:exported="true">
@@ -52,7 +38,6 @@
             </intent-filter>
         </activity>
 
-        <!-- Servicio que mantiene la app viva en segundo plano, usando el micrófono -->
         <service
             android:name=".service.AsistenteService"
             android:exported="false"
@@ -61,8 +46,19 @@
         <service
             android:name=".service.OverlayAvatarService"
             android:exported="false" />
+
+        <!-- NUEVO: Servicio de Accesibilidad para lectura de pantalla -->
+        <service
+            android:name=".accesibilidad.IrisAccessibilityService"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_service_config" />
+        </service>
+
     </application>
-
-    
-
 </manifest>
