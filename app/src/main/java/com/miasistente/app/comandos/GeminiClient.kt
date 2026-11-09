@@ -13,10 +13,8 @@ import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 
-/** Respuesta de error de la API (código HTTP + mensaje). */
 class HttpException(val codigo: Int, mensaje: String) : IOException(mensaje)
 
-/** ¿Hay internet de verdad? */
 object Conectividad {
     fun hayInternet(context: Context): Boolean {
         val gestor = context.applicationContext.getSystemService(ConnectivityManager::class.java)
@@ -28,40 +26,29 @@ object Conectividad {
     }
 }
 
-/**
- * Cliente mínimo de la API REST de Gemini.
- *
- * - La API Key sale de SecureStorage y viaja en un encabezado (nunca en la URL, para que no
- *   quede en registros).
- * - [MODELO_POR_DEFECTO] puede quedar obsoleto con el tiempo: si Gemini responde "model not
- *   found", cambia este nombre por uno vigente (Google AI Studio muestra la lista).
- * - Se intenta con búsqueda de Google activada; si el modelo no la admite (error 400) se
- *   reintenta sin ella.
- */
 class GeminiClient(
-    private val almacen: SecureStorage,
+    almacen: SecureStorage, // Se mantiene por compatibilidad pero ya no exige clave local
     private val modelo: String = MODELO_POR_DEFECTO
 ) {
 
     companion object {
         const val MODELO_POR_DEFECTO = "gemini-2.5-flash"
-        private const val BASE = "https://generativelanguage.googleapis.com/v1beta/models"
+        // CAMBIA ESTA URL POR LA TUYA EXACTA DE CLOUDFLARE WORKER
+        private const val BASE = "https://asistente.cristian-nava-ruido.workers.dev/v1beta/models"
         private const val INSTRUCCION =
             "Eres un asistente de voz en un teléfono. Responde siempre en español, de forma " +
                 "clara y breve (máximo 3 frases), sin formato Markdown ni listas."
     }
 
     suspend fun preguntar(pregunta: String): Result<String> = withContext(Dispatchers.IO) {
-        val clave = almacen.obtenerApiKey()
-            ?: return@withContext Result.failure(IllegalStateException("Falta la API Key de Gemini."))
         try {
-            Result.success(llamar(clave, pregunta, conBusqueda = true))
+            Result.success(llamar(pregunta, conBusqueda = true))
         } catch (e: CancellationException) {
             throw e
         } catch (e: HttpException) {
             if (e.codigo == 400) {
                 try {
-                    Result.success(llamar(clave, pregunta, conBusqueda = false))
+                    Result.success(llamar(pregunta, conBusqueda = false))
                 } catch (e2: Exception) {
                     Result.failure(e2)
                 }
@@ -73,7 +60,7 @@ class GeminiClient(
         }
     }
 
-    private fun llamar(clave: String, pregunta: String, conBusqueda: Boolean): String {
+    private fun llamar(pregunta: String, conBusqueda: Boolean): String {
         val cuerpo = JSONObject().apply {
             put(
                 "systemInstruction",
@@ -97,7 +84,6 @@ class GeminiClient(
             readTimeout = 45_000
             doOutput = true
             setRequestProperty("Content-Type", "application/json")
-            setRequestProperty("x-goog-api-key", clave)
         }
         try {
             conexion.outputStream.use { it.write(cuerpo.toString().toByteArray(Charsets.UTF_8)) }
