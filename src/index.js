@@ -16,6 +16,28 @@ export default {
 
     try {
       const url = new URL(request.url);
+
+      // Endpoint seguro para reconocimiento de música con AudD
+      if (url.pathname.includes("/recognize") || url.pathname.includes("/audd")) {
+        const formData = await request.formData();
+        formData.set("api_token", env.AUDD_API_TOKEN);
+        formData.set("return", "spotify,apple_music");
+
+        const auddResponse = await fetch("https://api.audd.io/", {
+          method: "POST",
+          body: formData,
+        });
+        const auddData = await auddResponse.text();
+        return new Response(auddData, {
+          status: auddResponse.status,
+          headers: {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+          },
+        });
+      }
+
+      // Proxy estándar para Gemini API
       const geminiUrl = `https://generativelanguage.googleapis.com${url.pathname}${url.search}`;
       const body = await request.text();
 
