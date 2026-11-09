@@ -31,6 +31,7 @@ import com.miasistente.app.comandos.EjecutorLocal
 import com.miasistente.app.comandos.ProcesadorComandos
 import com.miasistente.app.dominio.AssistantState
 import com.miasistente.app.service.AsistenteService
+import com.miasistente.app.service.VozAsistente
 import com.miasistente.app.ui.AsistenteTema
 import com.miasistente.app.ui.ChatAttachment
 import com.miasistente.app.ui.ChatViewModel
@@ -45,11 +46,11 @@ import kotlinx.coroutines.withContext
 class MainActivity : ComponentActivity() {
 
     private lateinit var procesador: ProcesadorComandos
+    private lateinit var vozAsistente: VozAsistente
     private val chat: ChatViewModel by viewModels()
     private val prefs by lazy { getSharedPreferences("iris_prefs", MODE_PRIVATE) }
     private val googleSignIn by lazy { GoogleSignInManager(this) }
 
-    // Estado de la interfaz que vive en la actividad
     private var userName by mutableStateOf<String?>(null)
     private var userEmail by mutableStateOf<String?>(null)
     private var userPhoto by mutableStateOf<String?>(null)
@@ -75,34 +76,30 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
-        // Pantalla completa real: evita que el teclado "empuje" toda la ventana
         WindowCompat.setDecorFitsSystemWindows(window, false)
 
         procesador = ProcesadorComandos(this)
+        vozAsistente = VozAsistente(this)
 
-        // Restaurar preferencias
         darkTheme = prefs.getBoolean("dark_theme", true)
         userName = prefs.getString("user_name", null)
         userEmail = prefs.getString("user_email", null)
         userPhoto = prefs.getString("user_photo", null)
 
-        // Solo reanuda la escucha si el usuario la había activado y ya hay permiso
         if (prefs.getBoolean("mic_enabled", false) && tienePermisoMicrofono()) {
             AsistenteService.start(this)
         }
 
-        // Construye el índice de apps en segundo plano
         lifecycleScope.launch(Dispatchers.Default) {
             EjecutorLocal(applicationContext).precalentar()
         }
 
-        // Los comandos por voz también aparecen en el chat
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 AsistenteService.eventosComando.collect { evento ->
                     chat.addUser(evento.comandoUsuario)
                     chat.addAssistant(evento.respuesta)
+                    vozAsistente.hablar(evento.respuesta)
                 }
             }
         }
@@ -113,7 +110,6 @@ class MainActivity : ComponentActivity() {
                     val isServiceRunning by AsistenteService.isRunning.collectAsState()
                     val audio by AsistenteService.estadoAudio.collectAsState()
 
-                    // Iconos de la barra de estado legibles en modo claro y oscuro
                     val view = LocalView.current
                     SideEffect {
                         val controller = WindowCompat.getInsetsController(window, view)
@@ -121,7 +117,6 @@ class MainActivity : ComponentActivity() {
                         controller.isAppearanceLightNavigationBars = !darkTheme
                     }
 
-                    // Si el servicio de voz falla, se le avisa al usuario
                     LaunchedEffect(audio.error) {
                         audio.error?.let { aviso(it) }
                     }
@@ -163,10 +158,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    // ---------------------------------------------------------------------------------
-    // Chat
-    // ---------------------------------------------------------------------------------
-
     private fun enviar(texto: String) {
         chat.addUser(texto)
         chat.updateThinking(true)
@@ -175,11 +166,15 @@ class MainActivity : ComponentActivity() {
             AsistenteService.updateAssistantState(AssistantState.THINKING)
             try {
                 val resultado = withContext(Dispatchers.IO) { procesador.procesar(texto) }
-                chat.addAssistant(resultado.mensaje.ifBlank { "Listo." })
+                val respuestaFinal = resultado.mensaje.ifBlank { "Listo." }
+                chat.addAssistant(respuestaFinal)
+                vozAsistente.hablar(respuestaFinal)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                chat.addAssistant("No pude completar eso: ${e.message ?: "error desconocido"}")
+                val errorMsg = "No pude completar eso: ${e.message ?: "error desconocido"}"
+                chat.addAssistant(errorMsg)
+                vozAsistente.hablar(errorMsg)
             } finally {
                 chat.updateThinking(false)
                 AsistenteService.updateAssistantState(AssistantState.IDLE)
@@ -207,15 +202,9 @@ class MainActivity : ComponentActivity() {
                     if (iTamano >= 0 && !cursor.isNull(iTamano)) tamano = cursor.getLong(iTamano)
                 }
             }
-        } catch (e: Exception) {
-            // Si no se puede leer el nombre, se usa el valor por defecto
-        }
+        } catch (_: Exception) {}
         return ChatAttachment(uri.toString(), nombre, mime, tamano)
     }
-
-    // ---------------------------------------------------------------------------------
-    // Micrófono
-    // ---------------------------------------------------------------------------------
 
     private fun tienePermisoMicrofono(): Boolean =
         ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
@@ -231,8 +220,6 @@ class MainActivity : ComponentActivity() {
             activarMicrofono()
             return
         }
-        // Primero se explica en una tarjeta discreta; el permiso del sistema solo se pide
-        // si el usuario acepta. Si Android ya no deja preguntar, se ofrece abrir los ajustes.
         val bloqueado = prefs.getBoolean("mic_asked", false) &&
             !ActivityCompat.shouldShowRequestPermissionRationale(this, Manifest.permission.RECORD_AUDIO)
         permissionPrompt = PermissionPrompt(PermissionKind.MICROPHONE, goToSettings = bloqueado)
@@ -256,16 +243,11 @@ class MainActivity : ComponentActivity() {
         AsistenteService.start(this)
     }
 
-    // ---------------------------------------------------------------------------------
-    // Tema y sesión
-    // ---------------------------------------------------------------------------------
-
     private fun cambiarTema(oscuro: Boolean) {
         darkTheme = oscuro
         prefs.edit().putBoolean("dark_theme", oscuro).apply()
     }
 
-    /** Inicio de sesión con Google (Credential Manager). El menú cambia solo al completarse. */
     private fun iniciarSesionGoogle() {
         lifecycleScope.launch {
             when (val resultado = googleSignIn.signIn(this@MainActivity)) {
@@ -298,11 +280,6 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch { googleSignIn.signOut() }
     }
 
-    // ---------------------------------------------------------------------------------
-    // Acciones del menú y de Ajustes
-    // (ajustes, about, privacy y account las resuelve la propia IrisScreen)
-    // ---------------------------------------------------------------------------------
-
     private fun manejarAccion(destination: String) {
         when (destination) {
             "new_chat" -> chat.clear()
@@ -322,24 +299,29 @@ class MainActivity : ComponentActivity() {
         )
         try {
             startActivity(intent)
-        } catch (e: ActivityNotFoundException) {
+        } catch (_: ActivityNotFoundException) {
             aviso("No se pudo abrir los ajustes")
         }
     }
 
     private fun enviarCorreoSoporte() {
         val intent = Intent(Intent.ACTION_SENDTO).apply {
-            data = Uri.parse("mailto:contactirisasistant@gmail.com") // <- cambia por tu correo
+            data = Uri.parse("mailto:contactirisasistant@gmail.com")
             putExtra(Intent.EXTRA_SUBJECT, "Ayuda y sugerencias - Iris")
         }
         try {
             startActivity(intent)
-        } catch (e: ActivityNotFoundException) {
+        } catch (_: ActivityNotFoundException) {
             aviso("No hay una app de correo instalada")
         }
     }
 
     private fun aviso(texto: String) {
         Toast.makeText(this, texto, Toast.LENGTH_SHORT).show()
+    }
+
+    override fun onDestroy() {
+        vozAsistente.cerrar()
+        super.onDestroy()
     }
 }
