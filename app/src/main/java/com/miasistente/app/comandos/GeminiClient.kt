@@ -3,7 +3,6 @@ package com.miasistente.app.comandos
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
-import com.miasistente.app.data.SecureStorage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -27,7 +26,6 @@ object Conectividad {
 }
 
 class GeminiClient(
-    almacen: SecureStorage, // Se mantiene por compatibilidad pero ya no exige clave local
     private val modelo: String = MODELO_POR_DEFECTO
 ) {
 
