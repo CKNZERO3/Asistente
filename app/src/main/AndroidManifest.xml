@@ -47,7 +47,7 @@
             android:name=".service.OverlayAvatarService"
             android:exported="false" />
 
-        <!-- NUEVO: Servicio de Accesibilidad para lectura de pantalla -->
+        <!-- NUEVO: Servicio de Accesibilidad -->
         <service
             android:name=".accesibilidad.IrisAccessibilityService"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
