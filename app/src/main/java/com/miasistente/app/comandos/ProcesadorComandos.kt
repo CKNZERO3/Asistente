@@ -5,18 +5,14 @@ import android.content.Intent
 import android.provider.Settings
 import com.miasistente.app.accesibilidad.IrisAccessibilityService
 import com.miasistente.app.data.Ajustes
-import com.miasistente.app.data.SecureStorage
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 
 class ProcesadorComandos(context: Context) {
 
     private val appContext = context.applicationContext
     private val parser = IntentParser()
     private val local = EjecutorLocal(appContext)
-    private val almacen = SecureStorage(appContext)
-    private val gemini = GeminiClient(almacen)
+    private val gemini = GeminiClient()
     private val ajustes = Ajustes(appContext)
 
     suspend fun procesar(texto: String, palabraClave: String = ajustes.palabraClave): ResultadoComando {
@@ -73,10 +69,6 @@ class ProcesadorComandos(context: Context) {
     private suspend fun consultarGemini(pregunta: String): ResultadoComando {
         if (!Conectividad.hayInternet(appContext)) {
             return ResultadoComando(false, "Sin internet: esta consulta necesita Gemini.")
-        }
-        val hayClave = withContext(Dispatchers.IO) { almacen.tieneApiKey() }
-        if (!hayClave) {
-            return ResultadoComando(false, "Falta la API Key de Gemini (guárdala en Capacidades).")
         }
         return gemini.preguntar(pregunta).fold(
             onSuccess = { ResultadoComando(true, it) },
