@@ -1,18 +1,15 @@
 package com.miasistente.app.comandos
 
 import android.content.Context
+import android.content.Intent
+import android.provider.Settings
+import com.miasistente.app.accesibilidad.IrisAccessibilityService
 import com.miasistente.app.data.Ajustes
 import com.miasistente.app.data.SecureStorage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-/**
- * Punto de entrada único para cualquier comando (hablado o escrito):
- *
- *   texto → quitar palabra clave → IntentParser → ConsultaIA? → GeminiClient (online)
- *                                              → otra       → EjecutorLocal (offline)
- */
 class ProcesadorComandos(context: Context) {
 
     private val appContext = context.applicationContext
@@ -26,6 +23,9 @@ class ProcesadorComandos(context: Context) {
         val comando = quitarPalabraClave(texto, palabraClave)
         if (comando.isBlank()) return ResultadoComando(false, "No escuché ningún comando.")
 
+        // Patrón para lectura de pantalla bajo demanda
+        if (patronLeerPantalla.containsMatchIn(normalizar(comando))) return leerPantalla()
+
         return try {
             when (val intencion = parser.parsear(comando)) {
                 is Intencion.ConsultaIA -> consultarGemini(intencion.pregunta)
@@ -38,7 +38,9 @@ class ProcesadorComandos(context: Context) {
         }
     }
 
-    /** "Oye asistente, abre cámara" → "abre cámara". Sin palabra clave al inicio, no cambia nada. */
+    private val patronLeerPantalla =
+        Regex("""\b(?:lee|leer|leeme|lea)\b.*\b(?:pantalla|pagina|web|sitio|contenido)\b""")
+
     private fun quitarPalabraClave(texto: String, palabra: String): String {
         val original = texto.trim()
         val norm = normalizar(original)
@@ -47,6 +49,25 @@ class ProcesadorComandos(context: Context) {
         val m = Regex("""^(?:(?:oye|hey|ok)\s+)?${Regex.escape(p)}\b[\s,.:;!?-]*""").find(norm)
             ?: return original
         return (if (original.length == norm.length) original else norm).substring(m.value.length)
+    }
+
+    private suspend fun leerPantalla(): ResultadoComando {
+        if (!IrisAccessibilityService.estaActivo()) {
+            try {
+                appContext.startActivity(
+                    Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                )
+            } catch (e: Exception) {
+                // Sin pantalla de ajustes disponible
+            }
+            return ResultadoComando(false, "Activa el servicio de accesibilidad de Iris para poder leer la pantalla.")
+        }
+        val texto = IrisAccessibilityService.textoVisible()?.take(8_000)
+            ?: return ResultadoComando(false, "No encontré texto visible en la pantalla.")
+        return consultarGemini(
+            "Este es el texto visible en la pantalla del usuario. " +
+                "Léelo y resúmelo en español de forma breve y clara:\n\n$texto"
+        )
     }
 
     private suspend fun consultarGemini(pregunta: String): ResultadoComando {
