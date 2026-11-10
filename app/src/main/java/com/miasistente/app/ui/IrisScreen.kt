@@ -216,8 +216,9 @@ fun IrisScreen(
                 "privacy" -> InfoDialog(
                     title = "Privacidad y datos",
                     text = "La palabra clave se reconoce en tu teléfono con un modelo de voz local. " +
-                        "Las consultas generales se envían a Gemini usando tu propia API Key, " +
-                        "guardada de forma segura en el dispositivo. Puedes revocar el micrófono, " +
+                        "Las consultas generales se procesan con un servicio de inteligencia artificial " +
+                        "de Google a través del servidor de Iris; ninguna clave se guarda en tu teléfono. " +
+                        "Puedes revocar el micrófono, " +
                         "las fotos y los archivos cuando quieras desde Ajustes → Permisos.",
                     onDismiss = { dialog = null }
                 )
