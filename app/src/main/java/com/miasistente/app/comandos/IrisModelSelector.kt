@@ -20,7 +20,8 @@ enum class CategoriaTarea {
 
 object IrisModelSelector {
 
-    const val MODELO_GENERAL = "gemini-2.5-flash"
+    // gemini-2.5-flash está deprecado y devuelve 404 en proyectos nuevos; 3.6 es la versión estable.
+    const val MODELO_GENERAL = "gemini-3.6-flash"
     const val MODELO_LIGERO = "gemini-3.5-flash-lite"
     const val MODELO_AVANZADO = "gemini-3.8-flash"
 

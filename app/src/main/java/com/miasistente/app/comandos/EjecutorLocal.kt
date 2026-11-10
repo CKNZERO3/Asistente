@@ -64,7 +64,7 @@ class EjecutorLocal(context: Context) {
             withContext(Dispatchers.Default) { abrirAplicacion(intencion.nombreApp) }
         is Intencion.ReproducirMusica -> reproducirMusica(intencion.consulta)
         is Intencion.ConsultaIA ->
-            ResultadoComando(false, "Esta consulta necesita Gemini.")
+            ResultadoComando(false, "Esta consulta necesita conexión con mi servicio de inteligencia.")
     }
 
     // --- Notas: delegar el guardado a una aplicación instalada ----------------------------

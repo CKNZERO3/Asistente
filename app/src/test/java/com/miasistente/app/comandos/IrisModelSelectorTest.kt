@@ -47,6 +47,7 @@ class IrisModelSelectorTest {
     @Test
     fun noSeAceptanModelosFueraDelCatalogoInicial() {
         assertThat(IrisModelSelector.esModeloPermitido("modelo-inventado")).isFalse()
-        assertThat(IrisModelSelector.esModeloPermitido("gemini-2.5-flash")).isTrue()
+        assertThat(IrisModelSelector.esModeloPermitido(IrisModelSelector.MODELO_GENERAL)).isTrue()
+        assertThat(IrisModelSelector.esModeloPermitido("gemini-2.5-flash")).isFalse()
     }
 }
