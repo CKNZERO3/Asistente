@@ -44,7 +44,6 @@ class GeminiClient(
         private const val TAG = "IrisGeminiClient"
         private const val TIMEOUT_CONEXION_MS = 15_000
         private const val TIMEOUT_LECTURA_MS = 60_000
-        private val CODIGOS_CON_FALLBACK = setOf(404, 429, 503)
 
         private const val INSTRUCCION =
             "Eres Iris, el asistente personal del usuario en su teléfono. " +
@@ -75,7 +74,7 @@ class GeminiClient(
             } catch (e: HttpException) {
                 ultimoError = e
                 val puedeCambiar = indice < candidatos.lastIndex &&
-                    e.codigo in CODIGOS_CON_FALLBACK
+                    debeProbarModeloAlternativo(e)
 
                 if (puedeCambiar) {
                     Log.w(
@@ -94,6 +93,21 @@ class GeminiClient(
         }
 
         Result.failure(ultimoError ?: IOException("No hay un modelo disponible."))
+    }
+
+    /**
+     * Un 429 del propio Worker no se arregla cambiando de modelo: respeta el límite
+     * del Worker y no multiplica solicitudes inútiles. Los 429 de Google sí permiten
+     * probar una alternativa con cuota disponible.
+     */
+    private fun debeProbarModeloAlternativo(error: HttpException): Boolean {
+        val mensaje = error.message.orEmpty()
+        return when (error.codigo) {
+            404 -> !mensaje.contains("Ruta no encontrada", ignoreCase = true)
+            429 -> !mensaje.contains("Worker", ignoreCase = true)
+            503 -> true
+            else -> false
+        }
     }
 
     private fun candidatosFallback(modeloSolicitado: String): List<String> =
@@ -116,6 +130,10 @@ class GeminiClient(
                 )
         }.distinct()
 
+    /**
+     * Algunos modelos o proyectos pueden no aceptar Google Search en una solicitud.
+     * Ante un HTTP 400 se reintenta una sola vez sin esa herramienta.
+     */
     private fun llamarConCompatibilidad(pregunta: String, modelo: String): String =
         try {
             llamar(pregunta, modelo, conBusqueda = true)
