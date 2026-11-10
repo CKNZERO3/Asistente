@@ -40,6 +40,14 @@ android {
         versionCode = System.getenv("VERSION_CODE")?.toIntOrNull() ?: 3
         versionName = System.getenv("VERSION_NAME") ?: "0.3.0"
 
+        // Token de app para el Worker (lo pone GitHub Actions desde el secreto APP_TOKEN).
+        // Solo letras y números. Sin la variable queda vacío y la app no envía la cabecera.
+        buildConfigField(
+            "String",
+            "APP_TOKEN",
+            "\"" + (System.getenv("APP_TOKEN") ?: "").filter { it.isLetterOrDigit() } + "\""
+        )
+
         ndk {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a")
         }

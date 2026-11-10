@@ -1,6 +1,7 @@
 package com.miasistente.app.audio
 
 import android.util.Log
+import com.miasistente.app.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -33,6 +34,7 @@ class AudDClient {
                 readTimeout = 30_000
                 doOutput = true
                 setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
+                if (BuildConfig.APP_TOKEN.isNotBlank()) setRequestProperty("X-App-Token", BuildConfig.APP_TOKEN)
             }
 
             conexion.outputStream.use { outputStream ->

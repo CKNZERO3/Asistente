@@ -68,11 +68,26 @@ class ProcesadorComandos(context: Context) {
 
     private suspend fun consultarGemini(pregunta: String): ResultadoComando {
         if (!Conectividad.hayInternet(appContext)) {
-            return ResultadoComando(false, "Sin internet: esta consulta necesita Gemini.")
+            return ResultadoComando(false, "Sin internet: esta consulta necesita conexión.")
         }
         return gemini.preguntar(pregunta).fold(
             onSuccess = { ResultadoComando(true, it) },
-            onFailure = { ResultadoComando(false, "Gemini: ${it.message ?: "error desconocido"}") }
+            onFailure = { ResultadoComando(false, mensajeAmigable(it)) }
         )
+    }
+
+    // Iris habla siempre con voz propia: el usuario no ve nombres de servicios internos ni códigos.
+    private fun mensajeAmigable(error: Throwable): String = when {
+        error is HttpException && (error.codigo == 401 || error.codigo == 403) ->
+            "No tengo permiso para conectarme ahora. Actualiza la aplicación e inténtalo de nuevo."
+        error is HttpException && error.codigo == 429 ->
+            "Estoy recibiendo demasiadas consultas. Espera unos segundos e inténtalo otra vez."
+        error is HttpException && error.codigo >= 500 ->
+            "Tuve un problema para pensar la respuesta. Inténtalo de nuevo en un momento."
+        error is HttpException ->
+            "No pude conectar con mi servicio de consultas. Inténtalo de nuevo en un momento."
+        error is java.io.IOException && error.message == "Gemini no devolvió texto." ->
+            "No supe qué responderte esta vez. ¿Puedes decirlo de otra forma?"
+        else -> "No pude completar la consulta. Inténtalo de nuevo."
     }
 }

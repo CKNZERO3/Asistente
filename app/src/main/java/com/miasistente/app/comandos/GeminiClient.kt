@@ -1,8 +1,10 @@
 package com.miasistente.app.comandos
 
 import android.content.Context
+import android.util.Log
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import com.miasistente.app.BuildConfig
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -33,9 +35,12 @@ class GeminiClient(
         const val MODELO_POR_DEFECTO = "gemini-2.5-flash"
         // CAMBIA ESTA URL POR LA TUYA EXACTA DE CLOUDFLARE WORKER
         private const val BASE = "https://asistente.cristian-nava-ruido.workers.dev/v1beta/models"
+        private const val TAG = "GeminiClient"
         private const val INSTRUCCION =
-            "Eres un asistente de voz en un teléfono. Responde siempre en español, de forma " +
-                "clara y breve (máximo 3 frases), sin formato Markdown ni listas."
+            "Eres Iris, el asistente personal de voz del usuario en su teléfono. Responde siempre " +
+                "en español, de forma clara y breve (máximo 3 frases), sin formato Markdown ni listas. " +
+                "Habla en primera persona, como Iris. No menciones el nombre de ningún modelo, " +
+                "empresa o proveedor tecnológico a menos que el usuario te lo pregunte directamente."
     }
 
     suspend fun preguntar(pregunta: String): Result<String> = withContext(Dispatchers.IO) {
@@ -82,6 +87,7 @@ class GeminiClient(
             readTimeout = 45_000
             doOutput = true
             setRequestProperty("Content-Type", "application/json")
+            if (BuildConfig.APP_TOKEN.isNotBlank()) setRequestProperty("X-App-Token", BuildConfig.APP_TOKEN)
         }
         try {
             conexion.outputStream.use { it.write(cuerpo.toString().toByteArray(Charsets.UTF_8)) }
@@ -89,6 +95,7 @@ class GeminiClient(
             val codigo = conexion.responseCode
             if (codigo !in 200..299) {
                 val detalle = conexion.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
+                Log.w(TAG, "HTTP $codigo: ${detalle.take(200)}")
                 throw HttpException(codigo, extraerError(detalle) ?: "Error HTTP $codigo")
             }
             val respuesta = conexion.inputStream.bufferedReader().use { it.readText() }
