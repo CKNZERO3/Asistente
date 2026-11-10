@@ -2,7 +2,9 @@ name: Build APK and Run Tests
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
+      - "fase2-*"
   workflow_dispatch:
 
 permissions:
@@ -17,20 +19,19 @@ jobs:
       - name: Descargar el código
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # historial completo: se usa para numerar la versión
+          fetch-depth: 0
 
       - name: Preparar firma fija y número de versión
         env:
           KEYSTORE_B64: ${{ secrets.RELEASE_KEYSTORE_B64 }}
         run: |
-          # versionCode = cantidad de commits: cada compilación nueva tiene un número mayor
           echo "VERSION_CODE=$(git rev-list --count HEAD)" >> "$GITHUB_ENV"
           if [ -n "$KEYSTORE_B64" ]; then
             echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/iris.jks"
             echo "RELEASE_KEYSTORE_PATH=$RUNNER_TEMP/iris.jks" >> "$GITHUB_ENV"
             echo "Firma fija activada."
           else
-            echo "::warning::No existe el secreto RELEASE_KEYSTORE_B64: se firma con una clave debug temporal y este APK NO se podrá instalar encima del anterior."
+            echo "::warning::No existe RELEASE_KEYSTORE_B64: se usará una clave debug temporal."
           fi
 
       - name: Instalar Java 17
