@@ -1,27 +1,38 @@
 // Límites de tamaño: acotan el coste máximo de cada petición.
-const MAX_JSON_BYTES = 256 * 1024; // consultas de texto a Gemini
-const MAX_AUDIO_BYTES = 4 * 1024 * 1024; // fragmento de audio para reconocer música
+const MAX_JSON_BYTES = 256 * 1024;
+const MAX_AUDIO_BYTES = 4 * 1024 * 1024;
 
-// Solo se permiten estos modelos y este método de Gemini.
-const RUTA_GEMINI = /^\/v1beta\/models\/gemini-2\.5-flash(-lite)?:generateContent$/;
+// Lista explícita de modelos de texto permitidos para generateContent.
+// TTS, Live, embeddings y transcripción tendrán rutas y clientes independientes.
+const MODELOS_GEMINI = new Set([
+  "gemini-2.5-flash",
+  "gemini-2.5-flash-lite",
+  "gemini-3-flash-preview",
+  "gemini-3.1-flash-lite",
+  "gemini-3.5-flash",
+  "gemini-3.5-flash-lite",
+  "gemini-3.6-flash",
+  "gemini-3.8-flash"
+]);
+
+const RUTA_GEMINI = /^\/v1beta\/models\/([a-z0-9-]+):generateContent$/;
 const RUTA_AUDD = "/recognize";
-
-// Campos que la app puede enviar a Gemini; el resto se descarta.
 const CAMPOS_GEMINI = ["systemInstruction", "contents", "tools", "generationConfig"];
 
 function respuesta(estado, cuerpo) {
   return new Response(typeof cuerpo === "string" ? cuerpo : JSON.stringify(cuerpo), {
     status: estado,
-    headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+      "Cache-Control": "no-store"
+    }
   });
 }
 
-// Mismo formato de error que usa Gemini: {"error":{"message":"..."}}
 function error(estado, mensaje) {
   return respuesta(estado, { error: { message: mensaje } });
 }
 
-// Comparación en tiempo constante (evita adivinar el token por diferencias de tiempo).
 function iguales(a, b) {
   const enc = new TextEncoder();
   const x = enc.encode(a);
@@ -32,7 +43,6 @@ function iguales(a, b) {
   return diff === 0;
 }
 
-// Lee el cuerpo como bytes y corta si supera el máximo (no confía en Content-Length).
 async function leerLimitado(request, maximo) {
   const declarado = Number(request.headers.get("Content-Length"));
   if (Number.isFinite(declarado) && declarado > maximo) return null;
@@ -51,11 +61,12 @@ async function leerLimitado(request, maximo) {
     }
     partes.push(value);
   }
+
   const todo = new Uint8Array(total);
   let pos = 0;
-  for (const p of partes) {
-    todo.set(p, pos);
-    pos += p.byteLength;
+  for (const parte of partes) {
+    todo.set(parte, pos);
+    pos += parte.length;
   }
   return todo;
 }
@@ -65,6 +76,7 @@ async function reconocerMusica(request, env) {
   if (!tipo.toLowerCase().startsWith("multipart/form-data")) {
     return error(400, "Formato no válido");
   }
+
   const bytes = await leerLimitado(request, MAX_AUDIO_BYTES);
   if (bytes === null) return error(413, "Audio demasiado grande");
 
@@ -74,10 +86,12 @@ async function reconocerMusica(request, env) {
   } catch {
     return error(400, "Formato no válido");
   }
-  const archivo = formulario.get("file");
-  if (!archivo || typeof archivo === "string") return error(400, "Falta el archivo de audio");
 
-  // Se arma un formulario nuevo: solo viaja lo imprescindible hacia AudD.
+  const archivo = formulario.get("file");
+  if (!archivo || typeof archivo === "string") {
+    return error(400, "Falta el archivo de audio");
+  }
+
   const salida = new FormData();
   salida.set("api_token", env.AUDD_API_TOKEN);
   salida.set("return", "spotify,apple_music");
@@ -97,50 +111,75 @@ async function consultarGemini(request, env, ruta) {
   } catch {
     return error(400, "JSON no válido");
   }
+
   if (entrada === null || typeof entrada !== "object" || Array.isArray(entrada)) {
     return error(400, "JSON no válido");
   }
 
   const cuerpo = {};
   for (const campo of CAMPOS_GEMINI) {
-    if (campo in entrada) cuerpo[campo] = entrada[campo];
+    if (Object.prototype.hasOwnProperty.call(entrada, campo)) {
+      cuerpo[campo] = entrada[campo];
+    }
   }
-  // Solo se permite la herramienta de búsqueda de Google
+
+  // Solo se permite Google Search. Las herramientas Android no se reenvían a Google.
   if (Array.isArray(cuerpo.tools)) {
     cuerpo.tools = cuerpo.tools.filter(
-      (t) => t && typeof t === "object" && Object.keys(t).every((k) => k === "google_search")
+      (herramienta) =>
+        herramienta &&
+        typeof herramienta === "object" &&
+        Object.keys(herramienta).every((clave) => clave === "google_search")
     );
+    if (cuerpo.tools.length === 0) delete cuerpo.tools;
   }
+
   if (!Array.isArray(cuerpo.contents) || cuerpo.contents.length === 0) {
     return error(400, "Falta el contenido de la consulta");
   }
 
-  // Sin query string: la app no lo necesita y así nadie puede añadir parámetros (p. ej. ?key=)
-  const gemini = await fetch(`https://generativelanguage.googleapis.com${ruta}`, {
+  const gemini = await fetch("https://generativelanguage.googleapis.com" + ruta, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "x-goog-api-key": env.GEMINI_API_KEY,
+      "x-goog-api-key": env.GEMINI_API_KEY
     },
-    body: JSON.stringify(cuerpo),
+    body: JSON.stringify(cuerpo)
   });
-  return respuesta(gemini.status, await gemini.text());
+
+  // Conserva el estado y la respuesta originales de Google para el diagnóstico Android.
+  const contenido = await gemini.text();
+  return new Response(contenido, {
+    status: gemini.status,
+    headers: {
+      "Content-Type": gemini.headers.get("Content-Type") || "application/json",
+      "Cache-Control": "no-store"
+    }
+  });
 }
 
 export default {
   async fetch(request, env) {
-    // Esta API es solo para la app (no para navegadores): no hay cabeceras CORS.
     if (request.method !== "POST") {
-      return new Response("Método no permitido", { status: 405, headers: { Allow: "POST" } });
+      return new Response("Método no permitido", {
+        status: 405,
+        headers: { Allow: "POST" }
+      });
     }
 
     try {
       const ruta = new URL(request.url).pathname;
       const esAudd = ruta === RUTA_AUDD;
-      const esGemini = RUTA_GEMINI.test(ruta);
-      if (!esAudd && !esGemini) return error(404, "No encontrado");
+      const coincidenciaGemini = ruta.match(RUTA_GEMINI);
+      const modeloGemini = coincidenciaGemini?.[1] || null;
+      const esGemini = modeloGemini !== null;
 
-      // 1) Token de la app
+      if (!esAudd && !esGemini) return error(404, "Ruta no encontrada");
+      if (esGemini && !MODELOS_GEMINI.has(modeloGemini)) {
+        return error(404, "Modelo no habilitado en Iris: " + modeloGemini);
+      }
+
+      // 1) Token de la aplicación.
       if (env.APP_TOKEN) {
         const enviado = request.headers.get("X-App-Token") || "";
         if (!iguales(enviado, env.APP_TOKEN)) {
@@ -149,14 +188,14 @@ export default {
         }
       }
 
-      // 2) Límite de peticiones (si el binding está configurado)
+      // 2) Límite adicional del Worker, si está configurado.
       if (env.RATE_LIMITER) {
         const clave = request.headers.get("CF-Connecting-IP") || "desconocida";
         const { success } = await env.RATE_LIMITER.limit({ key: clave });
-        if (!success) return error(429, "Demasiadas peticiones, espera un momento");
+        if (!success) return error(429, "Demasiadas peticiones al Worker");
       }
 
-      // 3) Secretos presentes
+      // 3) Verificar secretos.
       if (esAudd && !env.AUDD_API_TOKEN) {
         console.error("Falta el secreto AUDD_API_TOKEN");
         return error(500, "Servicio no disponible");
@@ -166,11 +205,12 @@ export default {
         return error(500, "Servicio no disponible");
       }
 
-      return esAudd ? await reconocerMusica(request, env) : await consultarGemini(request, env, ruta);
+      return esAudd
+        ? await reconocerMusica(request, env)
+        : await consultarGemini(request, env, ruta);
     } catch (e) {
-      // El detalle va al log del Worker, nunca a quien llama
-      console.error("Error interno:", e);
-      return error(500, "Error interno");
+      console.error("Error interno del Worker:", e);
+      return error(500, "Error interno del servicio");
     }
-  },
+  }
 };
