@@ -21,6 +21,15 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Preparar Node.js para validar el Worker
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Validar y empaquetar el Worker de Cloudflare (sin desplegar)
+        working-directory: app
+        run: npx --yes wrangler@4 deploy --dry-run --outdir ../.wrangler-dry-run
+
       - name: Preparar firma fija y número de versión
         env:
           KEYSTORE_B64: ${{ secrets.RELEASE_KEYSTORE_B64 }}
