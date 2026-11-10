@@ -84,7 +84,7 @@ class GeminiClient(
                     continue
                 }
 
-                Log.e(TAG, "Falló el modelo $modeloActual con HTTP ${e.codigo}.")
+                Log.e(TAG, "Falló el modelo $modeloActual con HTTP ${e.codigo}: ${e.message?.take(240)}")
                 return@withContext Result.failure(e)
             } catch (e: Exception) {
                 Log.e(TAG, "No se pudo completar la consulta con $modeloActual.", e)
