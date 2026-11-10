@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - "fase2-*"
+      - "fix/*"
   workflow_dispatch:
 
 permissions:
@@ -27,8 +28,7 @@ jobs:
           node-version: "22"
 
       - name: Validar y empaquetar el Worker de Cloudflare (sin desplegar)
-        working-directory: app
-        run: npx --yes wrangler@4 deploy --dry-run --outdir ../.wrangler-dry-run
+        run: npx --yes wrangler@4 deploy --dry-run --config wrangler.jsonc --outdir .wrangler-dry-run
 
       - name: Preparar firma fija y número de versión
         env:
