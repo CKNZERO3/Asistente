@@ -1,4 +1,11 @@
 {
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "asistente",
+  "main": "src/index.js",
+  "compatibility_date": "2026-03-01",
+  "keep_vars": true,
+  "assets": {
+    "directory": "public"
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "asistente",
   "main": "src/index.js",
