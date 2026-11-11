@@ -3,6 +3,7 @@ package com.miasistente.app.comandos
 import android.content.Context
 import android.content.Intent
 import android.provider.Settings
+import com.miasistente.app.BuildConfig
 import com.miasistente.app.accesibilidad.IrisAccessibilityService
 import com.miasistente.app.data.Ajustes
 import kotlinx.coroutines.CancellationException
@@ -94,7 +95,16 @@ class ProcesadorComandos(context: Context) {
         )
     }
 
-    private fun mensajeAmigable(error: Throwable): String = when {
+    // Solo en compilaciones debug (las de GitHub Actions) se añade el detalle técnico para
+    // poder diagnosticar; en una release firmada el usuario solo ve el mensaje amable.
+    private fun mensajeAmigable(error: Throwable): String {
+        val base = mensajeBase(error)
+        if (!BuildConfig.DEBUG || error !is HttpException) return base
+        val detalle = error.message.orEmpty().replace('\n', ' ').take(160)
+        return "$base\n[detalle: HTTP ${error.codigo} · ${error.modelo} · $detalle]"
+    }
+
+    private fun mensajeBase(error: Throwable): String = when {
         error is HttpException && error.codigo == 429 ->
             "Estoy atendiendo muchas consultas en este momento. Inténtalo de nuevo en unos segundos."
         error is HttpException && error.codigo in 401..403 ->
