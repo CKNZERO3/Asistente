@@ -13,3 +13,7 @@ captures/
 # Firmas y claves: NUNCA subir
 *.jks
 *.keystore
+
+# Salida local de wrangler
+.wrangler/
+.wrangler-dry-run/
