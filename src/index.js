@@ -15,7 +15,7 @@ const MODELOS_GEMINI = new Set([
   "gemini-3.8-flash"
 ]);
 
-const RUTA_GEMINI = /^\/v1beta\/models\/([a-z0-9-]+):generateContent$/;
+const RUTA_GEMINI = /^\/v1beta\/models\/([a-z0-9.-]+):generateContent$/;
 const RUTA_AUDD = "/recognize";
 const CAMPOS_GEMINI = ["systemInstruction", "contents", "tools", "generationConfig"];
 
