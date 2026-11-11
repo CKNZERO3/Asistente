@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - "fase2-*"
+      - "fix/*"
   workflow_dispatch:
 
 permissions:
