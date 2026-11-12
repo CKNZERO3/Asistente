@@ -1,12 +1,22 @@
 package com.miasistente.app.ui
 
+import android.Manifest
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BlurMaskFilter
 import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.Shader
 import android.net.Uri
+import android.os.Bundle
+import android.speech.RecognitionListener
+import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.RepeatMode
@@ -29,6 +39,9 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
@@ -38,6 +51,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -52,17 +66,35 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import androidx.core.graphics.PathParser
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import org.json.JSONArray
+import org.json.JSONObject
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
-private val SwitchTrackOffDark = Color(0xFF39304D)
-private val SwitchTrackOffLight = Color(0xFFD9D1EE)
+private data class SavedChatMessage(
+    val text: String,
+    val fromUser: Boolean
+)
+
+private data class SavedConversation(
+    val id: String,
+    val title: String,
+    val updatedAt: String,
+    val messages: List<SavedChatMessage>
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -75,6 +107,7 @@ fun IrisScreen(
     onDarkThemeChange: (Boolean) -> Unit = {},
     messages: List<ChatMessage> = emptyList(),
     isThinking: Boolean = false,
+    isSpeaking: Boolean = false,
     micActive: Boolean = false,
     micPulse: Boolean = false,
     voiceStatus: String? = null,
@@ -84,21 +117,210 @@ fun IrisScreen(
     onAvatarChanged: (Boolean) -> Unit = {},
     onSend: (String) -> Unit = {},
     onVoice: () -> Unit = {},
+    onStopSpeaking: () -> Unit = {},
     onAttach: () -> Unit = {},
     onPhotoSelected: (Uri) -> Unit = {},
     onAction: (String) -> Unit = {}
 ) {
+    val context = LocalContext.current
     val palette = if (darkTheme) IrisDarkPalette else IrisLightPalette
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
+
     var message by rememberSaveable { mutableStateOf("") }
     var showSettings by rememberSaveable { mutableStateOf(false) }
+    var settingsInitialPage by rememberSaveable { mutableStateOf("main") }
     var showAttachMenu by rememberSaveable { mutableStateOf(false) }
+    var showIrisGallery by rememberSaveable { mutableStateOf(false) }
     var dialog by rememberSaveable { mutableStateOf<String?>(null) }
+
+    // Control de voz inteligente (solo hablar cuando se usó micrófono) y botón de detener
+    var lastPromptWasVoice by rememberSaveable { mutableStateOf(false) }
+    var showStopVoicePill by remember { mutableStateOf(false) }
+
+    // Transcripción en vivo local con auto-apagado tras silencio
+    var liveListening by remember { mutableStateOf(false) }
+    var liveTranscript by remember { mutableStateOf<String?>(null) }
+    var speechRecognizer by remember { mutableStateOf<SpeechRecognizer?>(null) }
+
+    // Historial local de conversaciones
+    var conversations by remember { mutableStateOf(loadSavedConversations(context)) }
+    var activeConversationId by rememberSaveable { mutableStateOf("conv_${System.currentTimeMillis()}") }
+    var archivedMessages by remember { mutableStateOf<List<SavedChatMessage>?>(null) }
+
+    // Sincronizar la conversación activa en el historial local cuando llegan mensajes
+    LaunchedEffect(messages) {
+        if (messages.isNotEmpty() && archivedMessages == null) {
+            val mapped = messages.map { SavedChatMessage(text = it.text, fromUser = it.fromUser) }
+            val firstUserText = mapped.firstOrNull { it.fromUser && it.text.isNotBlank() }?.text
+                ?: "Nueva conversación"
+            val title = if (firstUserText.length > 34) firstUserText.take(34) + "…" else firstUserText
+            val now = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
+
+            val updated = conversations.toMutableList()
+            val idx = updated.indexOfFirst { it.id == activeConversationId }
+            val entry = SavedConversation(
+                id = activeConversationId,
+                title = title,
+                updatedAt = now,
+                messages = mapped
+            )
+            if (idx >= 0) {
+                updated[idx] = entry
+            } else {
+                updated.add(0, entry)
+            }
+            conversations = updated
+            persistSavedConversations(context, updated)
+        }
+    }
+
+    // Mostrar botón "Detener voz" cuando Iris esté hablando o respondiendo a una nota de voz
+    LaunchedEffect(isSpeaking, isThinking, lastPromptWasVoice, messages.size) {
+        if (isSpeaking) {
+            showStopVoicePill = true
+        } else if (lastPromptWasVoice && !isThinking && messages.lastOrNull()?.fromUser == false) {
+            showStopVoicePill = true
+            delay(8000)
+            showStopVoicePill = false
+        } else if (!lastPromptWasVoice) {
+            showStopVoicePill = false
+        }
+    }
+
+    fun stopSpeechRecognition() {
+        try {
+            speechRecognizer?.stopListening()
+            speechRecognizer?.destroy()
+        } catch (_: Exception) {
+        }
+        speechRecognizer = null
+        liveListening = false
+        liveTranscript = null
+    }
+
+    DisposableEffect(Unit) {
+        onDispose { stopSpeechRecognition() }
+    }
+
+    fun submitUserPrompt(rawText: String, fromVoice: Boolean) {
+        val clean = rawText.trim()
+        if (clean.isEmpty()) return
+        archivedMessages = null
+        lastPromptWasVoice = fromVoice
+        onAction(if (fromVoice) "tts_voice_mode" else "tts_text_mode")
+        if (!fromVoice) {
+            onStopSpeaking()
+            onAction("stop_speaking")
+        }
+        onSend(clean)
+        message = ""
+    }
+
+    fun startLiveSpeechRecognition() {
+        if (liveListening) {
+            stopSpeechRecognition()
+            return
+        }
+        if (!SpeechRecognizer.isRecognitionAvailable(context)) {
+            lastPromptWasVoice = true
+            onVoice()
+            return
+        }
+
+        stopSpeechRecognition()
+        val recognizer = SpeechRecognizer.createSpeechRecognizer(context)
+        speechRecognizer = recognizer
+        liveListening = true
+        liveTranscript = "Escuchando..."
+
+        recognizer.setRecognitionListener(object : RecognitionListener {
+            override fun onReadyForSpeech(params: Bundle?) {
+                liveTranscript = "Escuchando..."
+            }
+
+            override fun onBeginningOfSpeech() {}
+            override fun onRmsChanged(rmsdB: Float) {}
+            override fun onBufferReceived(buffer: ByteArray?) {}
+
+            override fun onEndOfSpeech() {
+                liveListening = false
+            }
+
+            override fun onError(error: Int) {
+                val partial = liveTranscript?.takeIf { it != "Escuchando..." }?.trim()
+                stopSpeechRecognition()
+                if (!partial.isNullOrEmpty()) {
+                    submitUserPrompt(partial, fromVoice = true)
+                }
+            }
+
+            override fun onResults(results: Bundle?) {
+                val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                val finalText = matches?.firstOrNull()?.trim()
+                    ?: liveTranscript?.takeIf { it != "Escuchando..." }?.trim()
+                stopSpeechRecognition()
+                if (!finalText.isNullOrEmpty()) {
+                    submitUserPrompt(finalText, fromVoice = true)
+                }
+            }
+
+            override fun onPartialResults(partialResults: Bundle?) {
+                val partial = partialResults
+                    ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                    ?.firstOrNull()
+                    ?.trim()
+                if (!partial.isNullOrEmpty()) {
+                    liveTranscript = partial
+                }
+            }
+
+            override fun onEvent(eventType: Int, params: Bundle?) {}
+        })
+
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "es-VE")
+            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1500L)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1500L)
+        }
+        recognizer.startListening(intent)
+    }
+
+    val micPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            startLiveSpeechRecognition()
+        }
+    }
+
+    fun handleMicTap() {
+        val granted = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.RECORD_AUDIO
+        ) == PackageManager.PERMISSION_GRANTED
+
+        if (granted) {
+            startLiveSpeechRecognition()
+        } else {
+            micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        }
+    }
 
     fun handle(action: String) {
         when (action) {
-            "settings" -> showSettings = true
+            "settings" -> {
+                settingsInitialPage = "main"
+                showSettings = true
+            }
+            "gallery" -> showIrisGallery = true
+            "new_chat" -> {
+                archivedMessages = null
+                activeConversationId = "conv_${System.currentTimeMillis()}"
+                onAction("new_chat")
+            }
             "about", "privacy", "account" -> dialog = action
             else -> onAction(action)
         }
@@ -147,32 +369,54 @@ fun IrisScreen(
                                 userName = userName,
                                 profilePhoto = profilePhoto,
                                 userEmail = userEmail,
-                                avatarEnabled = avatarEnabled,
-                                onAvatarChanged = onAvatarChanged,
+                                conversations = conversations,
+                                activeConversationId = activeConversationId,
+                                onSelectConversation = { conv ->
+                                    scope.launch {
+                                        drawerState.close()
+                                        activeConversationId = conv.id
+                                        archivedMessages = conv.messages
+                                    }
+                                },
+                                onDeleteConversation = { convId ->
+                                    val filtered = conversations.filterNot { it.id == convId }
+                                    conversations = filtered
+                                    persistSavedConversations(context, filtered)
+                                    if (activeConversationId == convId) {
+                                        archivedMessages = null
+                                        activeConversationId = "conv_${System.currentTimeMillis()}"
+                                        onAction("new_chat")
+                                    }
+                                },
                                 onAction = ::navigate
                             )
                         }
                     }
                 ) {
+                    val effectiveMicActive = liveListening || micActive
+                    val effectiveStatus = liveTranscript ?: voiceStatus
+
                     IrisMain(
                         userName = userName,
                         messages = messages,
+                        archivedMessages = archivedMessages,
                         isThinking = isThinking,
-                        micActive = micActive,
-                        micPulse = micPulse,
-                        voiceStatus = voiceStatus,
+                        showStopSpeaking = showStopVoicePill,
+                        micActive = effectiveMicActive,
+                        micPulse = liveListening || micPulse,
+                        voiceStatus = effectiveStatus,
                         message = message,
                         onMessageChange = { message = it },
                         onOpenDrawer = { scope.launch { drawerState.open() } },
                         onAttach = { showAttachMenu = true },
-                        onVoice = onVoice,
-                        onSend = {
-                            val text = message.trim()
-                            if (text.isNotEmpty()) {
-                                onSend(text)
-                                message = ""
-                            }
-                        }
+                        onVoice = ::handleMicTap,
+                        onStopSpeaking = {
+                            showStopVoicePill = false
+                            lastPromptWasVoice = false
+                            onStopSpeaking()
+                            onAction("stop_speaking")
+                        },
+                        onSend = { submitUserPrompt(message, fromVoice = false) }
                     )
                 }
 
@@ -184,9 +428,20 @@ fun IrisScreen(
                     IrisSettingsScreen(
                         darkTheme = darkTheme,
                         onDarkThemeChange = onDarkThemeChange,
+                        avatarEnabled = avatarEnabled,
+                        onAvatarChanged = onAvatarChanged,
+                        initialPage = settingsInitialPage,
                         onBack = { showSettings = false },
                         onAction = { handle(it) }
                     )
+                }
+
+                AnimatedVisibility(
+                    visible = showIrisGallery,
+                    enter = slideInHorizontally { it } + fadeIn(),
+                    exit = slideOutHorizontally { it } + fadeOut()
+                ) {
+                    IrisGalleryScreen(onBack = { showIrisGallery = false })
                 }
 
                 var lastPrompt by remember { mutableStateOf<PermissionPrompt?>(null) }
@@ -232,7 +487,8 @@ fun IrisScreen(
                         },
                         onNotebooks = {
                             showAttachMenu = false
-                            onAction("open_notebooks")
+                            settingsInitialPage = "notebook"
+                            showSettings = true
                         },
                         onMap = {
                             showAttachMenu = false
@@ -244,13 +500,15 @@ fun IrisScreen(
                         },
                         onPhotoSelected = { uri ->
                             showAttachMenu = false
+                            saveUriToIrisMedia(context, uri, "photo")
                             onPhotoSelected(uri)
                         }
                     )
                 }
             }
 
-            BackHandler(enabled = showSettings) { showSettings = false }
+            BackHandler(enabled = showIrisGallery) { showIrisGallery = false }
+            BackHandler(enabled = showSettings && !showIrisGallery) { showSettings = false }
 
             when (dialog) {
                 "about" -> InfoDialog(
@@ -260,11 +518,7 @@ fun IrisScreen(
                 )
                 "privacy" -> InfoDialog(
                     title = "Privacidad y datos",
-                    text = "La palabra clave se reconoce en tu teléfono con un modelo de voz local. " +
-                        "Las consultas generales se procesan con un servicio de inteligencia artificial " +
-                        "de Google a través del servidor de Iris; ninguna clave se guarda en tu teléfono. " +
-                        "Puedes revocar el micrófono, " +
-                        "las fotos y los archivos cuando quieras desde Ajustes → Permisos.",
+                    text = "La voz y tus archivos guardados se procesan y almacenan de forma segura en tu teléfono.",
                     onDismiss = { dialog = null }
                 )
                 "account" -> AlertDialog(
@@ -303,7 +557,9 @@ private fun InfoDialog(title: String, text: String, onDismiss: () -> Unit) {
 private fun IrisMain(
     userName: String?,
     messages: List<ChatMessage>,
+    archivedMessages: List<SavedChatMessage>?,
     isThinking: Boolean,
+    showStopSpeaking: Boolean,
     micActive: Boolean,
     micPulse: Boolean,
     voiceStatus: String?,
@@ -312,17 +568,20 @@ private fun IrisMain(
     onOpenDrawer: () -> Unit,
     onAttach: () -> Unit,
     onVoice: () -> Unit,
+    onStopSpeaking: () -> Unit,
     onSend: () -> Unit
 ) {
     val p = LocalIrisPalette.current
+    val density = LocalDensity.current
+    val imeOpen = WindowInsets.ime.getBottom(density) > 0
+    val hasContent = archivedMessages != null || messages.isNotEmpty()
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(p.background)
             .statusBarsPadding()
-            .navigationBarsPadding()
-            .imePadding()
+            .windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars))
             .padding(horizontal = 20.dp)
     ) {
         Text(
@@ -330,7 +589,7 @@ private fun IrisMain(
             color = p.text,
             fontSize = 28.sp,
             modifier = Modifier
-                .padding(top = 16.dp)
+                .padding(top = 12.dp)
                 .clip(RoundedCornerShape(12.dp))
                 .clickable(role = Role.Button, onClickLabel = "Abrir menú", onClick = onOpenDrawer)
                 .padding(horizontal = 8.dp, vertical = 6.dp)
@@ -342,10 +601,35 @@ private fun IrisMain(
                 .fillMaxWidth()
                 .clipToBounds()
         ) {
-            if (messages.isEmpty()) {
+            if (!hasContent) {
                 IrisWelcome(userName)
+            } else if (archivedMessages != null) {
+                SavedChatList(archivedMessages)
             } else {
                 IrisChatList(messages, isThinking)
+            }
+        }
+
+        if (showStopSpeaking) {
+            Row(
+                modifier = Modifier
+                    .align(Alignment.CenterHorizontally)
+                    .padding(bottom = 8.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(p.card)
+                    .border(1.dp, p.accent, RoundedCornerShape(50))
+                    .clickable(onClick = onStopSpeaking)
+                    .padding(horizontal = 14.dp, vertical = 7.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Default.StopCircle,
+                    contentDescription = "Detener voz",
+                    tint = p.accent,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(Modifier.width(6.dp))
+                Text("Detener voz", color = p.text, fontSize = 12.sp)
             }
         }
 
@@ -354,6 +638,8 @@ private fun IrisMain(
                 text = voiceStatus,
                 color = p.accent,
                 fontSize = 12.sp,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
                 modifier = Modifier
                     .align(Alignment.CenterHorizontally)
                     .padding(bottom = 8.dp)
@@ -374,7 +660,7 @@ private fun IrisMain(
             onSend = onSend
         )
 
-        Spacer(Modifier.height(18.dp))
+        Spacer(Modifier.height(if (imeOpen) 6.dp else 14.dp))
     }
 }
 
@@ -385,20 +671,20 @@ private fun IrisWelcome(userName: String?) {
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(vertical = 36.dp),
+            .padding(vertical = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        IrisLogo(modifier = Modifier.size(112.dp))
-        Spacer(Modifier.height(32.dp))
+        IrisLogo(modifier = Modifier.size(108.dp))
+        Spacer(Modifier.height(26.dp))
         Text(
             text = userName?.takeIf { it.isNotBlank() }?.let { "Hola, $it." } ?: "Hola.",
             color = p.muted,
             fontSize = 14.sp
         )
-        Spacer(Modifier.height(12.dp))
-        Text("¿Qué tienes en mente?", color = p.text, fontSize = 25.sp)
         Spacer(Modifier.height(10.dp))
+        Text("¿Qué tienes en mente?", color = p.text, fontSize = 24.sp)
+        Spacer(Modifier.height(8.dp))
         Text("Un espacio para tus ideas.", color = p.muted, fontSize = 13.sp)
     }
 }
@@ -416,7 +702,7 @@ private fun IrisChatList(messages: List<ChatMessage>, isThinking: Boolean) {
     LazyColumn(
         state = listState,
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(vertical = 16.dp),
+        contentPadding = PaddingValues(vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         items(messages, key = { it.id }) { message ->
@@ -426,6 +712,26 @@ private fun IrisChatList(messages: List<ChatMessage>, isThinking: Boolean) {
             item(key = "thinking") {
                 ChatBubble("Iris está pensando…", fromUser = false, attachment = null, muted = true)
             }
+        }
+    }
+}
+
+@Composable
+private fun SavedChatList(messages: List<SavedChatMessage>) {
+    val listState = rememberLazyListState()
+    LaunchedEffect(messages.size) {
+        if (messages.isNotEmpty()) listState.scrollToItem(messages.lastIndex)
+    }
+
+    LazyColumn(
+        state = listState,
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        items(messages.size) { idx ->
+            val item = messages[idx]
+            ChatBubble(item.text, item.fromUser, attachment = null)
         }
     }
 }
@@ -508,7 +814,7 @@ private fun IrisComposer(
             .clip(shape)
             .background(p.composer)
             .border(1.dp, p.outline, shape)
-            .padding(horizontal = 8.dp, vertical = 8.dp),
+            .padding(horizontal = 8.dp, vertical = 6.dp),
         verticalAlignment = Alignment.Bottom
     ) {
         IconButton(onClick = onAttach) {
@@ -520,7 +826,7 @@ private fun IrisComposer(
             onValueChange = onValueChange,
             modifier = Modifier
                 .weight(1f)
-                .padding(horizontal = 4.dp, vertical = 15.dp),
+                .padding(horizontal = 4.dp, vertical = 14.dp),
             textStyle = TextStyle(color = p.text, fontSize = 14.sp),
             cursorBrush = SolidColor(p.accent),
             maxLines = 4,
@@ -537,8 +843,8 @@ private fun IrisComposer(
         AnimatedContent(
             targetState = hasText,
             transitionSpec = {
-                (fadeIn(animationSpec = tween(160)) + scaleIn(initialScale = 0.85f))
-                    .togetherWith(fadeOut(animationSpec = tween(160)) + scaleOut(targetScale = 0.85f))
+                (fadeIn(animationSpec = tween(150)) + scaleIn(initialScale = 0.85f))
+                    .togetherWith(fadeOut(animationSpec = tween(150)) + scaleOut(targetScale = 0.85f))
             },
             label = "composer-action-button"
         ) { showSend ->
@@ -607,8 +913,10 @@ private fun IrisDrawer(
     userName: String?,
     profilePhoto: String?,
     userEmail: String?,
-    avatarEnabled: Boolean,
-    onAvatarChanged: (Boolean) -> Unit,
+    conversations: List<SavedConversation>,
+    activeConversationId: String,
+    onSelectConversation: (SavedConversation) -> Unit,
+    onDeleteConversation: (String) -> Unit,
     onAction: (String) -> Unit
 ) {
     val p = LocalIrisPalette.current
@@ -711,33 +1019,48 @@ private fun IrisDrawer(
             DrawerSectionTitle("General")
             DrawerItem("Nueva conversación", Icons.Default.Edit) { onAction("new_chat") }
 
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    Icons.Default.AutoAwesome,
-                    contentDescription = null,
-                    tint = p.accent,
-                    modifier = Modifier.size(20.dp)
-                )
-                Spacer(Modifier.width(12.dp))
-                Column(Modifier.weight(1f)) {
-                    Text("Avatar 3D", color = p.text, fontSize = 14.sp)
-                    Text("Animación del sistema", color = p.muted, fontSize = 11.sp)
+            if (conversations.isNotEmpty()) {
+                DrawerSectionTitle("Conversaciones")
+                conversations.forEach { conv ->
+                    val isCurrent = conv.id == activeConversationId
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 2.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(if (isCurrent) p.card else Color.Transparent)
+                            .clickable { onSelectConversation(conv) }
+                            .padding(horizontal = 10.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.ChatBubbleOutline,
+                            contentDescription = null,
+                            tint = if (isCurrent) p.accent else p.muted,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(Modifier.width(10.dp))
+                        Text(
+                            text = conv.title,
+                            color = p.text,
+                            fontSize = 13.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                        IconButton(
+                            onClick = { onDeleteConversation(conv.id) },
+                            modifier = Modifier.size(26.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Delete,
+                                contentDescription = "Borrar",
+                                tint = p.muted,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
                 }
-                Switch(
-                    checked = avatarEnabled,
-                    onCheckedChange = onAvatarChanged,
-                    colors = SwitchDefaults.colors(
-                        checkedThumbColor = Color.White,
-                        checkedTrackColor = Color(0xFF9564F6),
-                        uncheckedThumbColor = if (p.isDark) p.muted else Color.White,
-                        uncheckedTrackColor = if (p.isDark) SwitchTrackOffDark else SwitchTrackOffLight
-                    )
-                )
             }
         }
 
@@ -747,6 +1070,202 @@ private fun IrisDrawer(
     }
 }
 
+// -------------------------------------------------------------------------
+// PANTALLA DE GALERÍA DE IRIS (CONTENIDO GUARDADO POR EL USUARIO)
+// -------------------------------------------------------------------------
+@Composable
+private fun IrisGalleryScreen(onBack: () -> Unit) {
+    val p = LocalIrisPalette.current
+    val context = LocalContext.current
+    var selectedTab by rememberSaveable { mutableStateOf(0) }
+    val allItems by remember { mutableStateOf(loadIrisMedia(context)) }
+
+    val tabs = listOf("Todo", "Fotos", "Audios", "Archivos")
+    val filteredItems = remember(allItems, selectedTab) {
+        when (selectedTab) {
+            1 -> allItems.filter { it.type == "photo" }
+            2 -> allItems.filter { it.type == "audio" }
+            3 -> allItems.filter { it.type == "file" }
+            else -> allItems
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(p.background)
+            .statusBarsPadding()
+            .navigationBarsPadding()
+    ) {
+        SettingsTopBar("Galería de Iris", onBack)
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            tabs.forEachIndexed { idx, label ->
+                val active = selectedTab == idx
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(if (active) p.accent else p.card)
+                        .border(1.dp, if (active) p.accent else p.outline, RoundedCornerShape(50))
+                        .clickable { selectedTab = idx }
+                        .padding(horizontal = 14.dp, vertical = 8.dp)
+                ) {
+                    Text(
+                        text = label,
+                        color = if (active) Color.White else p.text,
+                        fontSize = 13.sp
+                    )
+                }
+            }
+        }
+
+        if (filteredItems.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .padding(32.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(
+                        imageVector = Icons.Outlined.PhotoLibrary,
+                        contentDescription = null,
+                        tint = p.muted,
+                        modifier = Modifier.size(48.dp)
+                    )
+                    Spacer(Modifier.height(14.dp))
+                    Text(
+                        text = "No hay nada aquí",
+                        color = p.text,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = "Las fotos, audios y archivos que subas a Iris se guardarán aquí.",
+                        color = p.muted,
+                        fontSize = 13.sp
+                    )
+                }
+            }
+        } else {
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(3),
+                contentPadding = PaddingValues(16.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.weight(1f)
+            ) {
+                items(filteredItems, key = { it.id }) { item ->
+                    val bitmapResult = if (item.type == "photo") rememberUriBitmap(item.uri, 300) else null
+                    Box(
+                        modifier = Modifier
+                            .aspectRatio(1f)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(p.card)
+                            .border(1.dp, p.outline, RoundedCornerShape(12.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        val btm = bitmapResult?.bitmap
+                        if (btm != null) {
+                            Image(
+                                bitmap = btm,
+                                contentDescription = item.name,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        } else {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                modifier = Modifier.padding(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = when (item.type) {
+                                        "audio" -> Icons.Outlined.AudioFile
+                                        "photo" -> Icons.Outlined.Image
+                                        else -> Icons.Outlined.InsertDriveFile
+                                    },
+                                    contentDescription = null,
+                                    tint = p.accent,
+                                    modifier = Modifier.size(28.dp)
+                                )
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    text = item.name,
+                                    color = p.text,
+                                    fontSize = 11.sp,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun loadSavedConversations(context: Context): List<SavedConversation> {
+    val prefs = context.getSharedPreferences("iris_history", Context.MODE_PRIVATE)
+    val raw = prefs.getString("conversations", null) ?: return emptyList()
+    return try {
+        val array = JSONArray(raw)
+        List(array.length()) { i ->
+            val obj = array.getJSONObject(i)
+            val msgsJson = obj.optJSONArray("messages") ?: JSONArray()
+            val msgs = List(msgsJson.length()) { j ->
+                val m = msgsJson.getJSONObject(j)
+                SavedChatMessage(
+                    text = m.optString("text"),
+                    fromUser = m.optBoolean("fromUser")
+                )
+            }
+            SavedConversation(
+                id = obj.getString("id"),
+                title = obj.getString("title"),
+                updatedAt = obj.optString("updatedAt", ""),
+                messages = msgs
+            )
+        }
+    } catch (_: Exception) {
+        emptyList()
+    }
+}
+
+private fun persistSavedConversations(context: Context, list: List<SavedConversation>) {
+    val array = JSONArray()
+    list.take(25).forEach { conv ->
+        val msgsJson = JSONArray()
+        conv.messages.forEach { msg ->
+            msgsJson.put(
+                JSONObject().apply {
+                    put("text", msg.text)
+                    put("fromUser", msg.fromUser)
+                }
+            )
+        }
+        array.put(
+            JSONObject().apply {
+                put("id", conv.id)
+                put("title", conv.title)
+                put("updatedAt", conv.updatedAt)
+                put("messages", msgsJson)
+            }
+        )
+    }
+    context.getSharedPreferences("iris_history", Context.MODE_PRIVATE)
+        .edit()
+        .putString("conversations", array.toString())
+        .apply()
+}
+
 @Composable
 private fun DrawerSectionTitle(title: String) {
     val p = LocalIrisPalette.current
@@ -754,7 +1273,7 @@ private fun DrawerSectionTitle(title: String) {
         text = title,
         color = p.muted,
         fontSize = 11.sp,
-        modifier = Modifier.padding(top = 26.dp, bottom = 10.dp)
+        modifier = Modifier.padding(top = 22.dp, bottom = 8.dp)
     )
 }
 
