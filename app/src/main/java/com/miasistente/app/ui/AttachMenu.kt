@@ -6,26 +6,26 @@ import android.net.Uri
 import android.provider.MediaStore
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
@@ -50,7 +50,7 @@ fun AttachBottomSheet(
     ModalBottomSheet(
         onDismissRequest = onDismissRequest,
         sheetState = sheetState,
-        containerColor = p.background, // Usa el fondo oscuro de tu tema
+        containerColor = MaterialTheme.colorScheme.background,
         dragHandle = { BottomSheetDefaults.DragHandle(color = p.muted) },
         shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
     ) {
@@ -59,12 +59,12 @@ fun AttachBottomSheet(
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp)
         ) {
-            // Fila superior de burbujas desplazable
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(bottom = 24.dp),
-                horizontalArrangement = Arrangement.SpaceBetween
+                    .horizontalScroll(rememberScrollState())
+                    .padding(bottom = 20.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 AttachBubble("Fotos", Icons.Outlined.Image, onPhotos)
                 AttachBubble("Cámara", Icons.Outlined.PhotoCamera, onCamera)
@@ -74,24 +74,37 @@ fun AttachBottomSheet(
                 AttachBubble("Mapa", Icons.Outlined.Map, onMap)
             }
 
-            // Tarjeta de acciones rápidas
+            val cardShape = RoundedCornerShape(20.dp)
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(20.dp))
+                    .clip(cardShape)
                     .background(p.card)
+                    .border(1.dp, p.outline, cardShape)
                     .padding(vertical = 8.dp)
             ) {
-                AttachRowAction("Crea imágenes", "Visualiza y edita", Icons.Outlined.Image) { onQuickAction("Crea una imagen de ") }
-                AttachRowAction("Crear videos", "Haz que las ideas cobren vida", Icons.Outlined.Videocam) { onQuickAction("Crea un video de ") }
-                AttachRowAction("Crear música", "Crea pistas de audio", Icons.Outlined.MusicNote) { onQuickAction("Crea una canción sobre ") }
-                AttachRowAction("Canvas", "Programa, escribe o crea diapositivas.", Icons.Outlined.AddBox) { onQuickAction("Abre un canvas para ") }
+                AttachRowAction("Crea imágenes", "Visualiza y edita", Icons.Outlined.Image) {
+                    onQuickAction("Crea una imagen de ")
+                }
+                AttachRowAction("Crear videos", "Haz que las ideas cobren vida", Icons.Outlined.Videocam) {
+                    onQuickAction("Crea un video de ")
+                }
+                AttachRowAction("Crear música", "Crea pistas de audio", Icons.Outlined.MusicNote) {
+                    onQuickAction("Crea una canción sobre ")
+                }
+                AttachRowAction("Canvas", "Programa, escribe o crea diapositivas.", Icons.Outlined.AddBox) {
+                    onQuickAction("Abre un canvas para ")
+                }
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
-            Text("Buscar en Google Fotos", color = p.text, fontSize = 16.sp, modifier = Modifier.padding(bottom = 16.dp))
+            Spacer(modifier = Modifier.height(20.dp))
+            Text(
+                text = "Recientes en galería",
+                color = p.text,
+                fontSize = 15.sp,
+                modifier = Modifier.padding(bottom = 12.dp)
+            )
 
-            // Galería integrada
             val context = LocalContext.current
             var recentPhotos by remember { mutableStateOf<List<Uri>>(emptyList()) }
 
@@ -105,7 +118,7 @@ fun AttachBottomSheet(
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(300.dp) // Altura fija para la galería dentro del bottom sheet
+                    .height(280.dp)
             ) {
                 items(recentPhotos) { uri ->
                     val bitmapResult = rememberUriBitmap(uri.toString(), 300)
@@ -137,15 +150,17 @@ private fun AttachBubble(label: String, icon: ImageVector, onClick: () -> Unit) 
     val p = LocalIrisPalette.current
     Column(
         modifier = Modifier
+            .clip(RoundedCornerShape(16.dp))
             .clickable(onClick = onClick)
             .padding(4.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Box(
             modifier = Modifier
-                .size(56.dp)
+                .size(62.dp)
                 .clip(CircleShape)
-                .background(p.card),
+                .background(p.card)
+                .border(1.dp, p.outline, CircleShape),
             contentAlignment = Alignment.Center
         ) {
             Icon(icon, contentDescription = label, tint = p.text, modifier = Modifier.size(24.dp))
@@ -174,25 +189,28 @@ private fun AttachRowAction(title: String, subtitle: String, icon: ImageVector, 
     }
 }
 
-// Función para obtener las fotos recientes del dispositivo
 suspend fun getRecentPhotos(context: Context): List<Uri> = withContext(Dispatchers.IO) {
     val uris = mutableListOf<Uri>()
     val projection = arrayOf(MediaStore.Images.Media._ID)
     val sortOrder = "${MediaStore.Images.Media.DATE_ADDED} DESC"
 
-    context.contentResolver.query(
-        MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-        projection,
-        null,
-        null,
-        sortOrder
-    )?.use { cursor ->
-        val idColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
-        while (cursor.moveToNext() && uris.size < 30) { // Cargar las últimas 30 fotos
-            val id = cursor.getLong(idColumn)
-            val contentUri = ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id)
-            uris.add(contentUri)
+    try {
+        context.contentResolver.query(
+            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+            projection,
+            null,
+            null,
+            sortOrder
+        )?.use { cursor ->
+            val idColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
+            while (cursor.moveToNext() && uris.size < 30) {
+                val id = cursor.getLong(idColumn)
+                val contentUri = ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id)
+                uris.add(contentUri)
+            }
         }
+    } catch (_: SecurityException) {
+        // Evita cierres si el usuario aún no ha otorgado permisos de lectura multimedia
     }
     uris
 }
