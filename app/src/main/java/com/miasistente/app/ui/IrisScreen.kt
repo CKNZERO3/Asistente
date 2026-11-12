@@ -5,7 +5,9 @@ import android.graphics.BlurMaskFilter
 import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.Shader
+import android.net.Uri
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -14,10 +16,13 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -38,8 +43,8 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.SolidColor
@@ -80,6 +85,7 @@ fun IrisScreen(
     onSend: (String) -> Unit = {},
     onVoice: () -> Unit = {},
     onAttach: () -> Unit = {},
+    onPhotoSelected: (Uri) -> Unit = {},
     onAction: (String) -> Unit = {}
 ) {
     val palette = if (darkTheme) IrisDarkPalette else IrisLightPalette
@@ -87,6 +93,7 @@ fun IrisScreen(
     val scope = rememberCoroutineScope()
     var message by rememberSaveable { mutableStateOf("") }
     var showSettings by rememberSaveable { mutableStateOf(false) }
+    var showAttachMenu by rememberSaveable { mutableStateOf(false) }
     var dialog by rememberSaveable { mutableStateOf<String?>(null) }
 
     fun handle(action: String) {
@@ -157,7 +164,7 @@ fun IrisScreen(
                         message = message,
                         onMessageChange = { message = it },
                         onOpenDrawer = { scope.launch { drawerState.open() } },
-                        onAttach = onAttach,
+                        onAttach = { showAttachMenu = true },
                         onVoice = onVoice,
                         onSend = {
                             val text = message.trim()
@@ -202,6 +209,44 @@ fun IrisScreen(
                             onDismiss = onPermissionDismiss
                         )
                     }
+                }
+
+                if (showAttachMenu) {
+                    AttachBottomSheet(
+                        onDismissRequest = { showAttachMenu = false },
+                        onPhotos = {
+                            showAttachMenu = false
+                            onAction("open_photos")
+                        },
+                        onCamera = {
+                            showAttachMenu = false
+                            onAction("open_camera")
+                        },
+                        onFiles = {
+                            showAttachMenu = false
+                            onAttach()
+                        },
+                        onDrive = {
+                            showAttachMenu = false
+                            onAction("open_drive")
+                        },
+                        onNotebooks = {
+                            showAttachMenu = false
+                            onAction("open_notebooks")
+                        },
+                        onMap = {
+                            showAttachMenu = false
+                            onAction("open_map")
+                        },
+                        onQuickAction = { action ->
+                            showAttachMenu = false
+                            message = action
+                        },
+                        onPhotoSelected = { uri ->
+                            showAttachMenu = false
+                            onPhotoSelected(uri)
+                        }
+                    )
                 }
             }
 
@@ -455,6 +500,7 @@ private fun IrisComposer(
 ) {
     val p = LocalIrisPalette.current
     val shape = RoundedCornerShape(28.dp)
+    val hasText = value.isNotBlank()
 
     Row(
         modifier = Modifier
@@ -488,25 +534,33 @@ private fun IrisComposer(
             }
         )
 
-        MicButton(active = micActive, pulsing = micPulse, onClick = onVoice)
-
-        Spacer(Modifier.width(2.dp))
-
-        Box(
-            modifier = Modifier
-                .size(44.dp)
-                .graphicsLayer { alpha = if (value.isBlank()) 0.55f else 1f }
-                .clip(CircleShape)
-                .background(IrisAccentGradient)
-                .clickable(role = Role.Button, onClickLabel = "Enviar", onClick = onSend),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                Icons.Default.ArrowUpward,
-                contentDescription = "Enviar",
-                tint = Color.White,
-                modifier = Modifier.size(22.dp)
-            )
+        AnimatedContent(
+            targetState = hasText,
+            transitionSpec = {
+                (fadeIn(animationSpec = tween(160)) + scaleIn(initialScale = 0.85f))
+                    .togetherWith(fadeOut(animationSpec = tween(160)) + scaleOut(targetScale = 0.85f))
+            },
+            label = "composer-action-button"
+        ) { showSend ->
+            if (showSend) {
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(CircleShape)
+                        .background(IrisAccentGradient)
+                        .clickable(role = Role.Button, onClickLabel = "Enviar", onClick = onSend),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.Default.ArrowUpward,
+                        contentDescription = "Enviar",
+                        tint = Color.White,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+            } else {
+                MicButton(active = micActive, pulsing = micPulse, onClick = onVoice)
+            }
         }
     }
 }
