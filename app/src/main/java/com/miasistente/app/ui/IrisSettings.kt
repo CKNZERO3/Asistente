@@ -4,30 +4,13 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.ChatBubbleOutline
-import androidx.compose.material.icons.filled.DarkMode
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.LightMode
-import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -41,7 +24,6 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-@Suppress("DEPRECATION")
 @Composable
 fun IrisSettingsScreen(
     darkTheme: Boolean,
@@ -59,6 +41,7 @@ fun IrisSettingsScreen(
             .statusBarsPadding()
             .navigationBarsPadding()
     ) {
+        // Top Bar
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -68,18 +51,33 @@ fun IrisSettingsScreen(
             IconButton(onClick = onBack) {
                 Icon(Icons.Default.ArrowBack, contentDescription = "Volver", tint = p.text)
             }
-            Text("Ajustes", color = p.text, fontSize = 22.sp, modifier = Modifier.padding(start = 4.dp))
+            Text("Configuración", color = p.text, fontSize = 20.sp, modifier = Modifier.padding(start = 16.dp))
         }
 
         Column(
             modifier = Modifier
                 .weight(1f)
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp, vertical = 8.dp)
+                .padding(horizontal = 16.dp, vertical = 8.dp)
         ) {
-            
-            SettingsSection("Apariencia")
+            // Tarjetas Superiores (Cuentas y Límites)
             SettingsCard {
+                SettingsItem("Administrar cuenta", null, Icons.Outlined.PersonOutline) { onAction("account") }
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+            SettingsCard {
+                SettingsItem("Límites de uso", null, Icons.Outlined.Schedule) { onAction("limits") }
+            }
+
+            // Sección de Preferencias
+            SettingsSection("Preferencias")
+            SettingsCard {
+                SettingsItem("Notificaciones", null, Icons.Outlined.Notifications) { onAction("notifications") }
+                SettingsDivider()
+                SettingsItem("Inteligencia personalizada", null, Icons.Outlined.AutoAwesome) { onAction("intelligence") }
+                SettingsDivider()
+                
+                // Toggle Modo Día/Noche
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -91,54 +89,38 @@ fun IrisSettingsScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(
-                            imageVector = if (darkTheme) Icons.Default.DarkMode else Icons.Default.LightMode,
+                            imageVector = Icons.Outlined.DarkMode,
                             contentDescription = null,
-                            tint = p.accent,
-                            modifier = Modifier.size(22.dp)
+                            tint = p.text,
+                            modifier = Modifier.size(24.dp)
                         )
-                        Spacer(Modifier.width(14.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text("Modo día / noche", color = p.text, fontSize = 14.sp)
-                            Text(
-                                if (darkTheme) "Oscuro" else "Claro",
-                                color = p.muted,
-                                fontSize = 12.sp
-                            )
-                        }
-                        IrisDayNightSwitch(
-                            isNight = darkTheme,
-                            onToggle = onDarkThemeChange,
-                            trackWidth = 96.dp,
-                            trackHeight = 52.dp
-                        )
+                        Spacer(Modifier.width(16.dp))
+                        Text("Tema", color = p.text, fontSize = 16.sp, modifier = Modifier.weight(1f))
+                        Text(if (darkTheme) "Oscuro" else "Claro", color = p.muted, fontSize = 14.sp)
+                        Spacer(Modifier.width(8.dp))
+                        Icon(Icons.Default.ChevronRight, contentDescription = null, tint = p.muted)
                     }
                 }
-            }
 
-            SettingsSection("Permisos de la app")
-            SettingsCard {
-                SettingsItem(
-                    title = "Micrófono, fotos y archivos",
-                    subtitle = "Se administran en los ajustes del sistema",
-                    icon = Icons.Default.Security
-                ) { onAction("permissions") }
-            }
-
-            SettingsSection("Acerca de la app")
-            SettingsCard {
-                SettingsItem("Sobre Iris", null, Icons.Default.Info) { onAction("about") }
                 SettingsDivider()
-                SettingsItem("Privacidad y datos", null, Icons.Default.Lock) { onAction("privacy") }
+                SettingsItem("Habilidades", null, Icons.Outlined.Extension) { onAction("skills") }
+                SettingsDivider()
+                SettingsItem("Voz", null, Icons.Outlined.RecordVoiceOver) { onAction("voice") }
+                SettingsDivider()
+                SettingsItem("Contenido multimedia", null, Icons.Outlined.MusicNote) { onAction("media") }
+                SettingsDivider()
+                SettingsItem("Controles de dispositivos", null, Icons.Outlined.Devices) { onAction("devices") }
+                SettingsDivider()
+                SettingsItem("Iris Notebook", null, Icons.Outlined.Book) { onAction("notebook") }
             }
 
-            SettingsSection("Contacto")
+            // Sección de Datos y Privacidad
+            SettingsSection("Datos y privacidad")
             SettingsCard {
-                SettingsItem("Ayuda y sugerencias", null, Icons.Default.ChatBubbleOutline) {
-                    onAction("support")
-                }
+                SettingsItem("Importar memoria", null, Icons.Outlined.UploadFile) { onAction("import") }
             }
 
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(32.dp))
         }
     }
 }
@@ -149,21 +131,20 @@ private fun SettingsSection(title: String) {
     Text(
         text = title,
         color = p.muted,
-        fontSize = 12.sp,
-        modifier = Modifier.padding(start = 4.dp, top = 22.dp, bottom = 10.dp)
+        fontSize = 14.sp,
+        modifier = Modifier.padding(start = 16.dp, top = 24.dp, bottom = 8.dp)
     )
 }
 
 @Composable
 private fun SettingsCard(content: @Composable ColumnScope.() -> Unit) {
     val p = LocalIrisPalette.current
-    val shape = RoundedCornerShape(20.dp)
+    val shape = RoundedCornerShape(24.dp)
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .clip(shape)
-            .background(p.card)
-            .border(1.dp, p.outline, shape),
+            .background(p.card), // Usa el color de la tarjeta del tema
         content = content
     )
 }
@@ -174,9 +155,9 @@ private fun SettingsDivider() {
     Box(
         Modifier
             .fillMaxWidth()
-            .padding(start = 52.dp)
+            .padding(horizontal = 16.dp)
             .height(1.dp)
-            .background(p.outline)
+            .background(p.outline.copy(alpha = 0.5f))
     )
 }
 
@@ -192,16 +173,17 @@ private fun SettingsItem(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(role = Role.Button, onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 14.dp),
+            .padding(horizontal = 16.dp, vertical = 16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(icon, contentDescription = null, tint = p.muted, modifier = Modifier.size(22.dp))
-        Spacer(Modifier.width(14.dp))
+        Icon(icon, contentDescription = null, tint = p.text, modifier = Modifier.size(24.dp))
+        Spacer(Modifier.width(16.dp))
         Column(Modifier.weight(1f)) {
-            Text(title, color = p.text, fontSize = 14.sp)
+            Text(title, color = p.text, fontSize = 16.sp)
             if (subtitle != null) {
-                Text(subtitle, color = p.muted, fontSize = 12.sp)
+                Text(subtitle, color = p.muted, fontSize = 14.sp)
             }
         }
+        Icon(Icons.Default.ChevronRight, contentDescription = null, tint = p.muted)
     }
 }
