@@ -22,6 +22,11 @@ import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
@@ -134,8 +139,7 @@ private fun MainSettingsContent(
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {}
-            .statusBarsPadding()
-            .navigationBarsPadding()
+            .windowInsetsPadding(WindowInsets.systemBars)
     ) {
         SettingsTopBar("Configuración", onBack)
 
@@ -356,8 +360,7 @@ fun ThemeSubmenuPage(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
-            .statusBarsPadding()
-            .navigationBarsPadding()
+            .windowInsetsPadding(WindowInsets.systemBars)
     ) {
         SettingsTopBar("Tema y apariencia", onBack)
 
@@ -525,7 +528,7 @@ fun ThemeSubmenuPage(
 @Composable
 fun NotificationsPage(onBack: () -> Unit) {
     val p = LocalIrisPalette.current
-    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).statusBarsPadding().navigationBarsPadding()) {
+    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).windowInsetsPadding(WindowInsets.systemBars)) {
         SettingsTopBar("Notificaciones", onBack)
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp)) {
             SettingsCard {
@@ -554,7 +557,7 @@ fun VoicePage(onImportVoice: () -> Unit, onBack: () -> Unit) {
         "Echo" to "Neutra y precisa"
     )
 
-    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).statusBarsPadding().navigationBarsPadding()) {
+    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).windowInsetsPadding(WindowInsets.systemBars)) {
         SettingsTopBar("Voz", onBack)
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp)) {
             SettingsCard {
@@ -576,7 +579,7 @@ fun VoicePage(onImportVoice: () -> Unit, onBack: () -> Unit) {
 fun MultimediaPage(onBack: () -> Unit) {
     val p = LocalIrisPalette.current
     var audioQuality by rememberSaveable { mutableStateOf(0.8f) }
-    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).statusBarsPadding().navigationBarsPadding()) {
+    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).windowInsetsPadding(WindowInsets.systemBars)) {
         SettingsTopBar("Contenido multimedia", onBack)
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp)) {
             SettingsCard {
@@ -604,7 +607,7 @@ fun MultimediaPage(onBack: () -> Unit) {
 @Composable
 fun DevicesPage(onBack: () -> Unit) {
     val p = LocalIrisPalette.current
-    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).statusBarsPadding().navigationBarsPadding()) {
+    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).windowInsetsPadding(WindowInsets.systemBars)) {
         SettingsTopBar("Controles de dispositivos", onBack)
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp)) {
             SettingsCard {
@@ -790,13 +793,29 @@ private fun NotebookEditorPage(
     )
     val sheetBg = paperColors.getOrElse(note.paperTintIndex) { Color.Transparent }
 
+    val baseBg = if (p.isDark) Color(0xFF080C21) else Color(0xFFF8F6FF)
+    val lineColor = p.outline.copy(alpha = 0.3f)
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
+            .background(baseBg)
             .then(if (sheetBg != Color.Transparent) Modifier.background(sheetBg.copy(alpha = 0.65f)) else Modifier)
-            .statusBarsPadding()
-            .navigationBarsPadding()
+            .drawBehind {
+                if (sheetBg == Color.Transparent) {
+                    val lineSpacing = 28.dp.toPx()
+                    var y = 140.dp.toPx()
+                    while (y < size.height) {
+                        drawLine(
+                            color = lineColor,
+                            start = androidx.compose.ui.geometry.Offset(0f, y),
+                            end = androidx.compose.ui.geometry.Offset(size.width, y),
+                            strokeWidth = 1.dp.toPx()
+                        )
+                        y += lineSpacing
+                    }
+                }
+            }
+            .windowInsetsPadding(WindowInsets.safeDrawing)
     ) {
         Row(
             modifier = Modifier
