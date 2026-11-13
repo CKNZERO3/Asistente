@@ -58,7 +58,7 @@ fun loadIrisMedia(context: Context): List<IrisSavedMedia> {
                 type = obj.optString("type", "photo")
             )
         }
-    } catch (_: Exception) {
+    } catch (e: Exception) {
         emptyList()
     }
 }
@@ -102,7 +102,7 @@ fun saveUriToIrisMedia(context: Context, uri: Uri, type: String) {
             .edit()
             .putString("items", arr.toString())
             .apply()
-    } catch (_: Exception) {
+    } catch (e: Exception) {
     }
 }
 
@@ -116,7 +116,7 @@ private fun resolveDisplayName(context: Context, uri: Uri): String {
                     if (idx >= 0) result = cursor.getString(idx)
                 }
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
         }
     }
     return result ?: uri.lastPathSegment?.substringAfterLast('/') ?: "archivo_${System.currentTimeMillis()}"
@@ -322,7 +322,7 @@ private fun launchSafeIntent(context: Context, intent: Intent): Boolean {
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         context.startActivity(intent)
         true
-    } catch (_: Exception) {
+    } catch (e: Exception) {
         false
     }
 }
