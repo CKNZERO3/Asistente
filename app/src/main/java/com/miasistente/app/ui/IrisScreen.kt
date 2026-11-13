@@ -133,6 +133,7 @@ fun IrisScreen(
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     val focusManager = LocalFocusManager.current
+    val outerOnStopSpeaking = onStopSpeaking
 
     var message by rememberSaveable { mutableStateOf("") }
     var showSettings by rememberSaveable { mutableStateOf(false) }
@@ -194,7 +195,7 @@ fun IrisScreen(
         try {
             speechRecognizer?.stopListening()
             speechRecognizer?.destroy()
-        } catch (_: Exception) {}
+        } catch (e: Exception) {}
         speechRecognizer = null
         liveListening = false
         liveTranscript = null
@@ -399,7 +400,7 @@ fun IrisScreen(
                         onStopSpeaking = {
                             showStopVoicePill = false
                             lastPromptWasVoice = false
-                            onStopSpeaking()
+                            outerOnStopSpeaking()
                             onAction("stop_external_agent_voice") 
                         },
                         onSend = { submitUserPrompt(message, fromVoice = false) }
@@ -1075,7 +1076,7 @@ private fun loadSavedConversations(context: Context): List<SavedConversation> {
             }
             SavedConversation(obj.getString("id"), obj.getString("title"), obj.optString("updatedAt", ""), msgs)
         }
-    } catch (_: Exception) { emptyList() }
+    } catch (e: Exception) { emptyList() }
 }
 
 private fun persistSavedConversations(context: Context, list: List<SavedConversation>) {
