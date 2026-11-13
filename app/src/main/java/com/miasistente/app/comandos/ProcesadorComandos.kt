@@ -14,6 +14,8 @@ class ProcesadorComandos(context: Context) {
     private val parser = IntentParser()
     private val local = EjecutorLocal(appContext)
     private val gemini = GeminiClient()
+    private val habilidades = HabilidadesLocales()
+    private val clima = ClimaOpenMeteo()
     private val ajustes = Ajustes(appContext)
 
     suspend fun procesar(
@@ -31,7 +33,7 @@ class ProcesadorComandos(context: Context) {
 
         return try {
             when (val intencion = parser.parsear(comando)) {
-                is Intencion.ConsultaIA -> consultarIris(intencion.pregunta)
+                is Intencion.ConsultaIA -> responderConsulta(intencion.pregunta)
                 else -> local.ejecutar(intencion)
             }
         } catch (e: CancellationException) {
@@ -80,6 +82,38 @@ class ProcesadorComandos(context: Context) {
             "Este es el texto visible en la pantalla del usuario. " +
                 "Léelo y resúmelo en español de forma breve y clara:\n\n$texto"
         )
+    }
+
+    /**
+     * Antes de gastar cuota de Gemini se intenta resolver la consulta en el teléfono
+     * (hora, fecha, cálculos) o con un servicio gratuito (clima).
+     */
+    private suspend fun responderConsulta(pregunta: String): ResultadoComando {
+        habilidades.responder(pregunta)?.let { return ResultadoComando(true, it) }
+        habilidades.peticionClima(pregunta)?.let { return consultarClima(it) }
+        return consultarIris(pregunta)
+    }
+
+    private suspend fun consultarClima(peticion: PeticionClima): ResultadoComando {
+        val ciudad = peticion.ciudad ?: return ResultadoComando(
+            false,
+            "¿De qué ciudad quieres saber el clima? Por ejemplo: «clima en Caracas»."
+        )
+        if (!Conectividad.hayInternet(appContext)) {
+            return ResultadoComando(false, "Para consultar el clima necesito conexión a internet.")
+        }
+        return try {
+            val datos = clima.consultar(ciudad)
+            if (datos == null) {
+                ResultadoComando(false, "No encontré una ciudad llamada «$ciudad».")
+            } else {
+                ResultadoComando(true, ClimaTexto.resumen(datos))
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            ResultadoComando(false, "No pude consultar el clima ahora mismo. Inténtalo de nuevo.")
+        }
     }
 
     private suspend fun consultarIris(pregunta: String): ResultadoComando {
