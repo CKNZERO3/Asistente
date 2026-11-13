@@ -43,6 +43,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -154,7 +155,6 @@ private fun MainSettingsContent(
                 SettingsItem("Inteligencia personalizada", null, Icons.Outlined.AutoAwesome) { onAction("intelligence") }
                 SettingsDivider()
 
-                // Barra de Tema original con switch deslizable y flecha hacia submenú
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -195,7 +195,6 @@ private fun MainSettingsContent(
 
                 SettingsDivider()
 
-                // Avatar 3D movido desde el menú lateral hacia Preferencias
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -265,7 +264,7 @@ fun DraggableThemeSwitch(
                 targetValue = if (isDark) 1f else 0f,
                 animationSpec = spring(
                     dampingRatio = Spring.DampingRatioNoBouncy,
-                    stiffness = Spring.StiffnessMedium
+                    stiffness = Spring.StiffnessLow
                 )
             )
         }
@@ -311,7 +310,7 @@ fun DraggableThemeSwitch(
                             targetValue = if (targetDark) 1f else 0f,
                             animationSpec = spring(
                                 dampingRatio = Spring.DampingRatioNoBouncy,
-                                stiffness = Spring.StiffnessMedium
+                                stiffness = Spring.StiffnessLow
                             )
                         )
                         if (targetDark != isDark) {
@@ -330,7 +329,7 @@ fun DraggableThemeSwitch(
                         targetValue = if (targetDark) 1f else 0f,
                         animationSpec = spring(
                             dampingRatio = Spring.DampingRatioNoBouncy,
-                            stiffness = Spring.StiffnessMedium
+                            stiffness = Spring.StiffnessLow
                         )
                     )
                     onToggle(targetDark)
@@ -463,6 +462,7 @@ fun ThemeSubmenuPage(
             val wallpapers = listOf(
                 "Iris Noche" to Color(0xFF080C21),
                 "Nebulosa" to Color(0xFF17112C),
+                "Negro AMOLED" to Color(0xFF000000),
                 "Grafito" to Color(0xFF1E1E2E),
                 "Iris Claro" to Color(0xFFF8F6FF),
                 "Lavanda" to Color(0xFFECE6FA),
@@ -626,6 +626,8 @@ private data class NotebookEntry(
 @Composable
 fun NotebookMockupPage(onBack: () -> Unit) {
     val p = LocalIrisPalette.current
+    val focusManager = LocalFocusManager.current
+    
     var notes by remember {
         mutableStateOf(
             listOf(
@@ -643,6 +645,7 @@ fun NotebookMockupPage(onBack: () -> Unit) {
     val openedNote = notes.find { it.id == openedNoteId }
 
     BackHandler(enabled = openedNote != null) {
+        focusManager.clearFocus()
         openedNoteId = null
     }
 
@@ -656,7 +659,10 @@ fun NotebookMockupPage(onBack: () -> Unit) {
                 notes = notes.filterNot { it.id == id }
                 openedNoteId = null
             },
-            onBack = { openedNoteId = null }
+            onBack = {
+                focusManager.clearFocus()
+                openedNoteId = null
+            }
         )
     } else {
         val sortedNotes = remember(notes) {
