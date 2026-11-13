@@ -142,7 +142,7 @@ private fun MainSettingsContent(
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {}
             .windowInsetsPadding(WindowInsets.systemBars)
     ) {
-        SettingsTopBar("ConfiguraciÃ³n", onBack)
+        SettingsTopBar("Configuración", onBack)
 
         Column(
             modifier = Modifier
@@ -155,7 +155,7 @@ private fun MainSettingsContent(
             }
             Spacer(modifier = Modifier.height(12.dp))
             SettingsCard {
-                SettingsItem("LÃ­mites de uso", null, Icons.Outlined.Schedule) { onAction("limits") }
+                SettingsItem("Límites de uso", null, Icons.Outlined.Schedule) { onAction("limits") }
             }
 
             SettingsSection("Preferencias")
@@ -191,7 +191,7 @@ private fun MainSettingsContent(
                     Spacer(Modifier.width(16.dp))
                     Column(Modifier.weight(1f)) {
                         Text("Avatar 3D", color = p.text, fontSize = 16.sp)
-                        Text("AnimaciÃ³n del sistema", color = p.muted, fontSize = 13.sp)
+                        Text("Animación del sistema", color = p.muted, fontSize = 13.sp)
                     }
                     Switch(
                         checked = avatarEnabled,
@@ -418,7 +418,7 @@ fun ThemeSubmenuPage(
                             Spacer(Modifier.width(16.dp))
                             Column(Modifier.weight(1f)) {
                                 Text("Fondo Negro AMOLED", color = p.text, fontSize = 16.sp)
-                                Text("Ahorra baterÃ­a con negros puros", color = p.muted, fontSize = 13.sp)
+                                Text("Ahorra batería con negros puros", color = p.muted, fontSize = 13.sp)
                             }
                             Switch(
                                 checked = amoledMode,
@@ -475,7 +475,7 @@ fun ThemeSubmenuPage(
                 }
             }
 
-            SettingsSection("Fondos clÃ¡sicos del chat")
+            SettingsSection("Fondos clásicos del chat")
             val wallpapers = listOf(
                 "Animado (Por defecto)" to Color(0xFF080C21),
                 "Nebulosa" to Color(0xFF17112C),
@@ -535,7 +535,7 @@ fun ThemeSubmenuPage(
 @Composable
 fun NotificationsPage(onBack: () -> Unit) {
     val p = LocalIrisPalette.current
-    Column(Modifier.fillMaxSize().background(if(amoledMode) Color.Black else MaterialTheme.colorScheme.background).windowInsetsPadding(WindowInsets.systemBars)) {
+    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).windowInsetsPadding(WindowInsets.systemBars)) {
         SettingsTopBar("Notificaciones", onBack)
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp)) {
             SettingsCard {
@@ -543,7 +543,7 @@ fun NotificationsPage(onBack: () -> Unit) {
                 SettingsDivider()
                 SettingsToggleItem("Recordatorios y tareas", true)
                 SettingsDivider()
-                SettingsToggleItem("Avisos de activaciÃ³n por voz", true)
+                SettingsToggleItem("Avisos de activación por voz", true)
                 SettingsDivider()
                 SettingsToggleItem("Sugerencias inteligentes", false)
             }
@@ -558,13 +558,13 @@ fun VoicePage(onImportVoice: () -> Unit, onBack: () -> Unit) {
     var selectedVoice by rememberSaveable { mutableStateOf(0) }
     val voices = listOf(
         "Nova" to "Clara y natural",
-        "Lyra" to "CÃ¡lida y cercana",
+        "Lyra" to "Cálida y cercana",
         "Orion" to "Profunda y serena",
-        "Vega" to "Ãgil y expresiva",
+        "Vega" to "Ágil y expresiva",
         "Echo" to "Neutra y precisa"
     )
 
-    Column(Modifier.fillMaxSize().background(if(amoledMode) Color.Black else MaterialTheme.colorScheme.background).windowInsetsPadding(WindowInsets.systemBars)) {
+    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).windowInsetsPadding(WindowInsets.systemBars)) {
         SettingsTopBar("Voz", onBack)
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp)) {
             SettingsCard {
@@ -586,7 +586,7 @@ fun VoicePage(onImportVoice: () -> Unit, onBack: () -> Unit) {
 fun MultimediaPage(onBack: () -> Unit) {
     val p = LocalIrisPalette.current
     var audioQuality by rememberSaveable { mutableStateOf(0.8f) }
-    Column(Modifier.fillMaxSize().background(if(amoledMode) Color.Black else MaterialTheme.colorScheme.background).windowInsetsPadding(WindowInsets.systemBars)) {
+    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).windowInsetsPadding(WindowInsets.systemBars)) {
         SettingsTopBar("Contenido multimedia", onBack)
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp)) {
             SettingsCard {
@@ -602,9 +602,9 @@ fun MultimediaPage(onBack: () -> Unit) {
                     )
                 }
                 SettingsDivider()
-                SettingsToggleItem("ReproducciÃ³n automÃ¡tica", true)
+                SettingsToggleItem("Reproducción automática", true)
                 SettingsDivider()
-                SettingsToggleItem("Guardar imÃ¡genes generadas", true)
+                SettingsToggleItem("Guardar imágenes generadas", true)
             }
         }
         SettingsSaveButton("Listo", onBack)
@@ -614,13 +614,13 @@ fun MultimediaPage(onBack: () -> Unit) {
 @Composable
 fun DevicesPage(onBack: () -> Unit) {
     val p = LocalIrisPalette.current
-    Column(Modifier.fillMaxSize().background(if(amoledMode) Color.Black else MaterialTheme.colorScheme.background).windowInsetsPadding(WindowInsets.systemBars)) {
+    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).windowInsetsPadding(WindowInsets.systemBars)) {
         SettingsTopBar("Controles de dispositivos", onBack)
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp)) {
             SettingsCard {
                 SettingsToggleItem("Control por voz en pantalla bloqueada", true)
                 SettingsDivider()
-                SettingsToggleItem("Audio Bluetooth automÃ¡tico", true)
+                SettingsToggleItem("Audio Bluetooth automático", true)
                 SettingsDivider()
                 SettingsToggleItem("Sincronizar con accesorios", false)
             }
@@ -637,7 +637,7 @@ data class NotebookEntry(
     val date: String,
     val pinned: Boolean = false,
     val locked: Boolean = false,
-    val paperType: String = "LÃ­neas"
+    val paperType: String = "Líneas"
 )
 
 @Composable
@@ -646,7 +646,7 @@ fun NotebookMockupPage(onBack: () -> Unit) {
     var notes by remember {
         mutableStateOf(
             listOf(
-                NotebookEntry(1, "Notas Personales", "", "12/11/2026", paperType = "LÃ­neas"),
+                NotebookEntry(1, "Notas Personales", "", "12/11/2026", paperType = "Líneas"),
                 NotebookEntry(2, "Proyecto de App", "", "13/11/2026", paperType = "Puntos")
             )
         )
@@ -696,7 +696,7 @@ fun NotebookMockupPage(onBack: () -> Unit) {
                         Column(modifier = Modifier.padding(start = 36.dp, top = 16.dp, end = 12.dp)) {
                             Text(note.title, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.Black)
                             Spacer(Modifier.height(8.dp))
-                            Text("Ãšltima mod: ${note.date}", fontSize = 10.sp, color = Color.DarkGray)
+                            Text("Última mod: ${note.date}", fontSize = 10.sp, color = Color.DarkGray)
                         }
                     }
                 }
@@ -757,7 +757,7 @@ fun NotebookDigitalPlanner(
                 .drawBehind {
                     val lineColor = Color(0xFFD3D3D3)
                     when (note.paperType) {
-                        "LÃ­neas" -> {
+                        "Líneas" -> {
                             val spacing = 32.dp.toPx()
                             var y = 100.dp.toPx()
                             while (y < size.height) {
@@ -765,7 +765,7 @@ fun NotebookDigitalPlanner(
                                 y += spacing
                             }
                         }
-                        "CuadrÃ­cula" -> {
+                        "Cuadrícula" -> {
                             val spacing = 24.dp.toPx()
                             var y = spacing
                             while (y < size.height) {
@@ -811,7 +811,7 @@ fun NotebookDigitalPlanner(
                     modifier = Modifier.weight(1f).padding(start = 8.dp)
                 )
                 IconButton(onClick = { showMenu = !showMenu }) {
-                    Icon(Icons.Default.MoreVert, "MenÃº", tint = Color.Black)
+                    Icon(Icons.Default.MoreVert, "Menú", tint = Color.Black)
                 }
             }
 
@@ -856,7 +856,7 @@ fun NotebookDigitalPlanner(
             Column(Modifier.fillMaxWidth().padding(16.dp)) {
                 Text("Tipo de papel", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = p.text)
                 Row(Modifier.fillMaxWidth().padding(vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf("Lisa", "LÃ­neas", "CuadrÃ­cula", "Puntos").forEach { type ->
+                    listOf("Lisa", "Líneas", "Cuadrícula", "Puntos").forEach { type ->
                         val selected = note.paperType == type
                         Box(
                             modifier = Modifier
