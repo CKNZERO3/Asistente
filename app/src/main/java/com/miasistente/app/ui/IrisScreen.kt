@@ -19,6 +19,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColor
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -59,6 +61,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.SolidColor
@@ -105,8 +108,10 @@ fun IrisScreen(
     userEmail: String? = null,
     avatarEnabled: Boolean = false,
     darkTheme: Boolean = true,
+    amoledMode: Boolean = false,
     onDarkThemeChange: (Boolean) -> Unit = {},
-    messages: List<ChatMessage> = emptyList(),
+    onAmoledChange: (Boolean) -> Unit = {},
+    messages: MutableList<ChatMessage>,
     isThinking: Boolean = false,
     isSpeaking: Boolean = false,
     micActive: Boolean = false,
@@ -147,7 +152,7 @@ fun IrisScreen(
     var activeConversationId by rememberSaveable { mutableStateOf("conv_${System.currentTimeMillis()}") }
     var archivedMessages by remember { mutableStateOf<List<SavedChatMessage>?>(null) }
 
-    LaunchedEffect(messages) {
+    LaunchedEffect(messages.size) {
         if (messages.isNotEmpty() && archivedMessages == null) {
             val mapped = messages.map { SavedChatMessage(text = it.text, fromUser = it.fromUser) }
             val firstUserText = mapped.firstOrNull { it.fromUser && it.text.isNotBlank() }?.text
@@ -189,8 +194,7 @@ fun IrisScreen(
         try {
             speechRecognizer?.stopListening()
             speechRecognizer?.destroy()
-        } catch (_: Exception) {
-        }
+        } catch (_: Exception) {}
         speechRecognizer = null
         liveListening = false
         liveTranscript = null
@@ -233,39 +237,25 @@ fun IrisScreen(
         liveTranscript = "Escuchando..."
 
         recognizer.setRecognitionListener(object : RecognitionListener {
-            override fun onReadyForSpeech(params: Bundle?) {
-                liveTranscript = "Escuchando..."
-            }
+            override fun onReadyForSpeech(params: Bundle?) { liveTranscript = "Escuchando..." }
             override fun onBeginningOfSpeech() {}
             override fun onRmsChanged(rmsdB: Float) {}
             override fun onBufferReceived(buffer: ByteArray?) {}
-            override fun onEndOfSpeech() {
-                liveListening = false
-            }
+            override fun onEndOfSpeech() { liveListening = false }
             override fun onError(error: Int) {
                 val partial = liveTranscript?.takeIf { it != "Escuchando..." }?.trim()
                 stopSpeechRecognition()
-                if (!partial.isNullOrEmpty()) {
-                    submitUserPrompt(partial, fromVoice = true)
-                }
+                if (!partial.isNullOrEmpty()) submitUserPrompt(partial, fromVoice = true)
             }
             override fun onResults(results: Bundle?) {
                 val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                val finalText = matches?.firstOrNull()?.trim()
-                    ?: liveTranscript?.takeIf { it != "Escuchando..." }?.trim()
+                val finalText = matches?.firstOrNull()?.trim() ?: liveTranscript?.takeIf { it != "Escuchando..." }?.trim()
                 stopSpeechRecognition()
-                if (!finalText.isNullOrEmpty()) {
-                    submitUserPrompt(finalText, fromVoice = true)
-                }
+                if (!finalText.isNullOrEmpty()) submitUserPrompt(finalText, fromVoice = true)
             }
             override fun onPartialResults(partialResults: Bundle?) {
-                val partial = partialResults
-                    ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                    ?.firstOrNull()
-                    ?.trim()
-                if (!partial.isNullOrEmpty()) {
-                    liveTranscript = partial
-                }
+                val partial = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()?.trim()
+                if (!partial.isNullOrEmpty()) liveTranscript = partial
             }
             override fun onEvent(eventType: Int, params: Bundle?) {}
         })
@@ -283,22 +273,12 @@ fun IrisScreen(
     val micPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
-        if (granted) {
-            startLiveSpeechRecognition()
-        }
+        if (granted) startLiveSpeechRecognition()
     }
 
     fun handleMicTap() {
-        val granted = ContextCompat.checkSelfPermission(
-            context,
-            Manifest.permission.RECORD_AUDIO
-        ) == PackageManager.PERMISSION_GRANTED
-
-        if (granted) {
-            startLiveSpeechRecognition()
-        } else {
-            micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-        }
+        val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+        if (granted) startLiveSpeechRecognition() else micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
     }
 
     fun handle(action: String) {
@@ -314,22 +294,14 @@ fun IrisScreen(
             }
             "new_chat" -> {
                 focusManager.clearFocus()
+                val filtered = conversations.filter { it.messages.isNotEmpty() }
+                conversations = filtered
+                persistSavedConversations(context, filtered)
+
                 archivedMessages = null
+                messages.clear()
                 activeConversationId = "conv_${System.currentTimeMillis()}"
-                
-                // Actualización Inmediata del historial
-                val newConv = SavedConversation(
-                    id = activeConversationId,
-                    title = "Nueva conversación",
-                    updatedAt = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date()),
-                    messages = emptyList()
-                )
-                val updatedList = mutableListOf(newConv)
-                updatedList.addAll(conversations.filterNot { it.id == activeConversationId })
-                conversations = updatedList
-                persistSavedConversations(context, updatedList)
-                
-                onAction("new_chat")
+                onAction("clear_messages")
             }
             "about", "privacy", "account" -> dialog = action
             else -> onAction(action)
@@ -346,8 +318,8 @@ fun IrisScreen(
     val colorScheme = if (darkTheme) {
         darkColorScheme(
             primary = palette.accent,
-            background = Color(0xFF080C21),
-            surface = Color(0xFF17112C),
+            background = if (amoledMode) Color.Black else Color(0xFF080C21),
+            surface = if (amoledMode) Color(0xFF0F0F0F) else Color(0xFF17112C),
             onSurface = palette.text,
             onBackground = palette.text
         )
@@ -392,9 +364,7 @@ fun IrisScreen(
                                     val filtered = conversations.filterNot { it.id == convId }
                                     conversations = filtered
                                     persistSavedConversations(context, filtered)
-                                    if (activeConversationId == convId) {
-                                        handle("new_chat")
-                                    }
+                                    if (activeConversationId == convId) handle("new_chat")
                                 },
                                 onAction = ::navigate
                             )
@@ -414,6 +384,8 @@ fun IrisScreen(
                         micPulse = liveListening || micPulse,
                         voiceStatus = effectiveStatus,
                         message = message,
+                        darkTheme = darkTheme,
+                        amoledMode = amoledMode,
                         onMessageChange = { message = it },
                         onOpenDrawer = {
                             focusManager.clearFocus()
@@ -428,7 +400,7 @@ fun IrisScreen(
                             showStopVoicePill = false
                             lastPromptWasVoice = false
                             onStopSpeaking()
-                            onAction("stop_speaking")
+                            onAction("stop_external_agent_voice") 
                         },
                         onSend = { submitUserPrompt(message, fromVoice = false) }
                     )
@@ -441,7 +413,9 @@ fun IrisScreen(
                 ) {
                     IrisSettingsScreen(
                         darkTheme = darkTheme,
+                        amoledMode = amoledMode,
                         onDarkThemeChange = onDarkThemeChange,
+                        onAmoledChange = onAmoledChange,
                         avatarEnabled = avatarEnabled,
                         onAvatarChanged = onAvatarChanged,
                         initialPage = settingsInitialPage,
@@ -522,33 +496,6 @@ fun IrisScreen(
 
             BackHandler(enabled = showIrisGallery) { showIrisGallery = false }
             BackHandler(enabled = showSettings && !showIrisGallery) { showSettings = false }
-
-            when (dialog) {
-                "about" -> InfoDialog(
-                    title = "Sobre Iris",
-                    text = "Iris es tu asistente personal para Android. Versión 1.0.",
-                    onDismiss = { dialog = null }
-                )
-                "privacy" -> InfoDialog(
-                    title = "Privacidad y datos",
-                    text = "La voz y tus archivos guardados se procesan y almacenan de forma segura en tu teléfono.",
-                    onDismiss = { dialog = null }
-                )
-                "account" -> AlertDialog(
-                    onDismissRequest = { dialog = null },
-                    title = { Text(userName ?: "Tu cuenta") },
-                    text = { Text("¿Quieres cerrar tu sesión en Iris?") },
-                    confirmButton = {
-                        TextButton(onClick = {
-                            dialog = null
-                            onAction("sign_out")
-                        }) { Text("Cerrar sesión", color = palette.accent) }
-                    },
-                    dismissButton = {
-                        TextButton(onClick = { dialog = null }) { Text("Cancelar", color = palette.muted) }
-                    }
-                )
-            }
         }
     }
 }
@@ -560,9 +507,7 @@ private fun InfoDialog(title: String, text: String, onDismiss: () -> Unit) {
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = { Text(text) },
-        confirmButton = {
-            TextButton(onClick = onDismiss) { Text("Cerrar", color = p.accent) }
-        }
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Cerrar", color = p.accent) } }
     )
 }
 
@@ -577,6 +522,8 @@ private fun IrisMain(
     micPulse: Boolean,
     voiceStatus: String?,
     message: String,
+    darkTheme: Boolean,
+    amoledMode: Boolean,
     onMessageChange: (String) -> Unit,
     onOpenDrawer: () -> Unit,
     onAttach: () -> Unit,
@@ -585,16 +532,35 @@ private fun IrisMain(
     onSend: () -> Unit
 ) {
     val p = LocalIrisPalette.current
-    val density = LocalDensity.current
-    val imeOpen = WindowInsets.ime.getBottom(density) > 0
     val hasContent = archivedMessages != null || messages.isNotEmpty()
+    
+    val infiniteTransition = rememberInfiniteTransition(label = "bg_anim")
+    val c1 by infiniteTransition.animateColor(
+        initialValue = Color(0xFF070B1C),
+        targetValue = Color(0xFF160A24),
+        animationSpec = infiniteRepeatable(tween(5000, easing = LinearEasing), RepeatMode.Reverse),
+        label = "c1"
+    )
+    val c2 by infiniteTransition.animateColor(
+        initialValue = Color(0xFF100720),
+        targetValue = Color(0xFF05122B),
+        animationSpec = infiniteRepeatable(tween(4500, easing = LinearEasing), RepeatMode.Reverse),
+        label = "c2"
+    )
+    
+    val bgModifier = if (darkTheme && !amoledMode) {
+        Modifier.background(Brush.linearGradient(listOf(c1, c2)))
+    } else {
+        Modifier.background(MaterialTheme.colorScheme.background)
+    }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(p.background)
+            .then(bgModifier)
             .statusBarsPadding()
-            .windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars))
+            .navigationBarsPadding()
+            .imePadding()
             .padding(horizontal = 20.dp)
     ) {
         Text(
@@ -615,7 +581,7 @@ private fun IrisMain(
                 .clipToBounds()
         ) {
             if (!hasContent) {
-                IrisWelcome(userName)
+                IrisWelcome(userName, !darkTheme)
             } else if (archivedMessages != null) {
                 SavedChatList(archivedMessages)
             } else {
@@ -629,20 +595,20 @@ private fun IrisMain(
                     .align(Alignment.CenterHorizontally)
                     .padding(bottom = 8.dp)
                     .clip(RoundedCornerShape(50))
-                    .background(p.card)
+                    .background(MaterialTheme.colorScheme.surface)
                     .border(1.dp, p.accent, RoundedCornerShape(50))
                     .clickable(onClick = onStopSpeaking)
-                    .padding(horizontal = 14.dp, vertical = 7.dp),
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(
                     imageVector = Icons.Default.StopCircle,
                     contentDescription = "Detener voz",
                     tint = p.accent,
-                    modifier = Modifier.size(16.dp)
+                    modifier = Modifier.size(18.dp)
                 )
-                Spacer(Modifier.width(6.dp))
-                Text("Detener voz", color = p.text, fontSize = 12.sp)
+                Spacer(Modifier.width(8.dp))
+                Text("Detener a Iris", color = p.text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
             }
         }
 
@@ -657,7 +623,7 @@ private fun IrisMain(
                     .align(Alignment.CenterHorizontally)
                     .padding(bottom = 8.dp)
                     .clip(RoundedCornerShape(50))
-                    .background(p.card)
+                    .background(MaterialTheme.colorScheme.surface)
                     .border(1.dp, p.outline, RoundedCornerShape(50))
                     .padding(horizontal = 14.dp, vertical = 6.dp)
             )
@@ -673,12 +639,12 @@ private fun IrisMain(
             onSend = onSend
         )
 
-        Spacer(Modifier.height(if (imeOpen) 6.dp else 14.dp))
+        Spacer(Modifier.height(14.dp))
     }
 }
 
 @Composable
-private fun IrisWelcome(userName: String?) {
+private fun IrisWelcome(userName: String?, isLightMode: Boolean) {
     val p = LocalIrisPalette.current
     Column(
         modifier = Modifier
@@ -688,7 +654,14 @@ private fun IrisWelcome(userName: String?) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        IrisLogo(modifier = Modifier.size(108.dp))
+        val shadowModifier = if (isLightMode) Modifier.graphicsLayer {
+            shadowElevation = 10f
+            shape = CircleShape
+            ambientShadowColor = Color.Black
+            spotShadowColor = Color.Black
+        } else Modifier
+        
+        IrisLogo(modifier = Modifier.size(108.dp).then(shadowModifier))
         Spacer(Modifier.height(26.dp))
         Text(
             text = userName?.takeIf { it.isNotBlank() }?.let { "Hola, $it." } ?: "Hola.",
@@ -696,7 +669,7 @@ private fun IrisWelcome(userName: String?) {
             fontSize = 14.sp
         )
         Spacer(Modifier.height(10.dp))
-        Text("¿Qué tienes en mente?", color = p.text, fontSize = 24.sp)
+        Text("¿Qué tienes en mente?", color = p.text, fontSize = 24.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(8.dp))
         Text("Un espacio para tus ideas.", color = p.muted, fontSize = 13.sp)
     }
@@ -706,9 +679,8 @@ private fun IrisWelcome(userName: String?) {
 private fun IrisChatList(messages: List<ChatMessage>, isThinking: Boolean) {
     val listState = rememberLazyListState()
     val total = messages.size + if (isThinking) 1 else 0
-    val imeOpen = WindowInsets.ime.getBottom(LocalDensity.current) > 0
 
-    LaunchedEffect(total, imeOpen) {
+    LaunchedEffect(total) {
         if (total > 0) listState.animateScrollToItem(total - 1)
     }
 
@@ -777,29 +749,21 @@ private fun ChatBubble(
         Box(
             modifier = Modifier
                 .widthIn(max = 300.dp)
-                .background(if (fromUser) IrisAccentGradient else SolidColor(p.assistantBubble), shape)
-                .then(
-                    if (!fromUser && !p.isDark) Modifier.border(1.dp, p.outline, shape) else Modifier
-                )
+                .background(if (fromUser) IrisAccentGradient else SolidColor(MaterialTheme.colorScheme.surface), shape)
+                .then(if (!fromUser && !p.isDark) Modifier.border(1.dp, p.outline, shape) else Modifier)
                 .padding(
                     horizontal = if (hasAttachment) 6.dp else 14.dp,
                     vertical = if (hasAttachment) 6.dp else 10.dp
                 )
         ) {
             Column {
-                if (attachment != null) {
-                    AttachmentPreview(attachment, onAccent = fromUser)
-                }
+                if (attachment != null) AttachmentPreview(attachment, onAccent = fromUser)
                 if (text.isNotBlank()) {
                     Text(
                         text = text,
                         color = textColor,
                         fontSize = 14.sp,
-                        modifier = if (hasAttachment) {
-                            Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
-                        } else {
-                            Modifier
-                        }
+                        modifier = if (hasAttachment) Modifier.padding(horizontal = 8.dp, vertical = 6.dp) else Modifier
                     )
                 }
             }
@@ -825,7 +789,7 @@ private fun IrisComposer(
         modifier = Modifier
             .fillMaxWidth()
             .clip(shape)
-            .background(p.composer)
+            .background(MaterialTheme.colorScheme.surface)
             .border(1.dp, p.outline, shape)
             .padding(horizontal = 8.dp, vertical = 6.dp),
         verticalAlignment = Alignment.Bottom
@@ -845,9 +809,7 @@ private fun IrisComposer(
             maxLines = 4,
             decorationBox = { innerTextField ->
                 Box {
-                    if (value.isEmpty()) {
-                        Text("Pregúntale algo a Iris...", color = p.muted, fontSize = 14.sp)
-                    }
+                    if (value.isEmpty()) Text("Pregúntale algo a Iris...", color = p.muted, fontSize = 14.sp)
                     innerTextField()
                 }
             }
@@ -870,12 +832,7 @@ private fun IrisComposer(
                         .clickable(role = Role.Button, onClickLabel = "Enviar", onClick = onSend),
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(
-                        Icons.Default.ArrowUpward,
-                        contentDescription = "Enviar",
-                        tint = Color.White,
-                        modifier = Modifier.size(22.dp)
-                    )
+                    Icon(Icons.Default.ArrowUpward, contentDescription = "Enviar", tint = Color.White, modifier = Modifier.size(22.dp))
                 }
             } else {
                 MicButton(active = micActive, pulsing = micPulse, onClick = onVoice)
@@ -899,17 +856,10 @@ private fun MicButton(active: Boolean, pulsing: Boolean, onClick: () -> Unit) {
     Box(
         modifier = Modifier
             .size(44.dp)
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-            }
+            .graphicsLayer { scaleX = scale; scaleY = scale }
             .clip(CircleShape)
             .background(if (active) IrisAccentGradient else SolidColor(Color.Transparent))
-            .clickable(
-                role = Role.Button,
-                onClickLabel = if (active) "Desactivar micrófono" else "Activar micrófono",
-                onClick = onClick
-            ),
+            .clickable(role = Role.Button, onClickLabel = if (active) "Desactivar micrófono" else "Activar micrófono", onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
         Icon(
@@ -938,16 +888,12 @@ private fun IrisDrawer(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(p.background)
+            .background(MaterialTheme.colorScheme.background)
             .statusBarsPadding()
             .navigationBarsPadding()
             .padding(horizontal = 24.dp, vertical = 20.dp)
     ) {
-        Column(
-            modifier = Modifier
-                .weight(1f)
-                .verticalScroll(rememberScrollState())
-        ) {
+        Column(modifier = Modifier.weight(1f).verticalScroll(rememberScrollState())) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 IrisLogo(Modifier.size(28.dp))
                 Spacer(Modifier.width(10.dp))
@@ -967,12 +913,7 @@ private fun IrisDrawer(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text("Iniciar sesión", color = Color.White, modifier = Modifier.weight(1f))
-                    Icon(
-                        Icons.Default.ArrowOutward,
-                        contentDescription = null,
-                        tint = Color.White,
-                        modifier = Modifier.size(18.dp)
-                    )
+                    Icon(Icons.Default.ArrowOutward, null, tint = Color.White, modifier = Modifier.size(18.dp))
                 }
             } else {
                 Row(
@@ -984,49 +925,26 @@ private fun IrisDrawer(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     if (photo != null) {
-                        Image(
-                            bitmap = photo,
-                            contentDescription = "Perfil",
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier
-                                .size(44.dp)
-                                .clip(CircleShape)
-                        )
+                        Image(bitmap = photo, contentDescription = "Perfil", contentScale = ContentScale.Crop, modifier = Modifier.size(44.dp).clip(CircleShape))
                     } else {
-                        Box(
-                            Modifier
-                                .size(44.dp)
-                                .clip(CircleShape)
-                                .background(p.accent.copy(alpha = 0.2f)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(Icons.Default.Person, contentDescription = null, tint = p.text)
+                        Box(Modifier.size(44.dp).clip(CircleShape).background(p.accent.copy(alpha = 0.2f)), contentAlignment = Alignment.Center) {
+                            Icon(Icons.Default.Person, null, tint = p.text)
                         }
                     }
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
                         Text(userName, color = p.text)
-                        Text(
-                            userEmail ?: "Tu espacio personal",
-                            color = p.muted,
-                            fontSize = 12.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
+                        Text(userEmail ?: "Tu espacio personal", color = p.muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
-                    Icon(Icons.Default.ExpandMore, contentDescription = null, tint = p.muted)
+                    Icon(Icons.Default.ExpandMore, null, tint = p.muted)
                 }
             }
 
             Spacer(Modifier.height(20.dp))
 
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                DrawerAction("Buscar", "Chats y archivos", Icons.Default.Search, Modifier.weight(1f)) {
-                    onAction("search")
-                }
-                DrawerAction("Galería", "Contenido de Iris", Icons.Default.PhotoLibrary, Modifier.weight(1f)) {
-                    onAction("gallery")
-                }
+                DrawerAction("Buscar", "Chats y archivos", Icons.Default.Search, Modifier.weight(1f)) { onAction("search") }
+                DrawerAction("Galería", "Contenido de Iris", Icons.Default.PhotoLibrary, Modifier.weight(1f)) { onAction("gallery") }
             }
 
             DrawerSectionTitle("General")
@@ -1041,44 +959,22 @@ private fun IrisDrawer(
                             .fillMaxWidth()
                             .padding(vertical = 2.dp)
                             .clip(RoundedCornerShape(12.dp))
-                            .background(if (isCurrent) p.card else Color.Transparent)
+                            .background(if (isCurrent) MaterialTheme.colorScheme.surface else Color.Transparent)
                             .clickable { onSelectConversation(conv) }
                             .padding(horizontal = 10.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(
-                            imageVector = Icons.Outlined.ChatBubbleOutline,
-                            contentDescription = null,
-                            tint = if (isCurrent) p.accent else p.muted,
-                            modifier = Modifier.size(18.dp)
-                        )
+                        Icon(Icons.Outlined.ChatBubbleOutline, null, tint = if (isCurrent) p.accent else p.muted, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(10.dp))
-                        Text(
-                            text = conv.title,
-                            color = p.text,
-                            fontSize = 13.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f)
-                        )
-                        IconButton(
-                            onClick = { onDeleteConversation(conv.id) },
-                            modifier = Modifier.size(26.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Outlined.Delete,
-                                contentDescription = "Borrar",
-                                tint = p.muted,
-                                modifier = Modifier.size(16.dp)
-                            )
+                        Text(text = conv.title, color = p.text, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                        IconButton(onClick = { onDeleteConversation(conv.id) }, modifier = Modifier.size(26.dp)) {
+                            Icon(Icons.Outlined.Delete, "Borrar", tint = p.muted, modifier = Modifier.size(16.dp))
                         }
                     }
                 }
             }
         }
-
         Spacer(Modifier.height(16.dp))
-
         DrawerItem("Ajustes", Icons.Default.Settings) { onAction("settings") }
     }
 }
@@ -1101,18 +997,11 @@ private fun IrisGalleryScreen(onBack: () -> Unit) {
     }
 
     Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(p.background)
-            .statusBarsPadding()
-            .navigationBarsPadding()
+        modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).statusBarsPadding().navigationBarsPadding()
     ) {
         SettingsTopBar("Galería de Iris", onBack)
-
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             tabs.forEachIndexed { idx, label ->
@@ -1120,48 +1009,22 @@ private fun IrisGalleryScreen(onBack: () -> Unit) {
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(50))
-                        .background(if (active) p.accent else p.card)
+                        .background(if (active) p.accent else MaterialTheme.colorScheme.surface)
                         .border(1.dp, if (active) p.accent else p.outline, RoundedCornerShape(50))
                         .clickable { selectedTab = idx }
                         .padding(horizontal = 14.dp, vertical = 8.dp)
-                ) {
-                    Text(
-                        text = label,
-                        color = if (active) Color.White else p.text,
-                        fontSize = 13.sp
-                    )
-                }
+                ) { Text(label, color = if (active) Color.White else p.text, fontSize = 13.sp) }
             }
         }
 
         if (filteredItems.isEmpty()) {
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-                    .padding(32.dp),
-                contentAlignment = Alignment.Center
-            ) {
+            Box(Modifier.weight(1f).fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(
-                        imageVector = Icons.Outlined.PhotoLibrary,
-                        contentDescription = null,
-                        tint = p.muted,
-                        modifier = Modifier.size(48.dp)
-                    )
+                    Icon(Icons.Outlined.PhotoLibrary, null, tint = p.muted, modifier = Modifier.size(48.dp))
                     Spacer(Modifier.height(14.dp))
-                    Text(
-                        text = "No hay nada aquí",
-                        color = p.text,
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Medium
-                    )
+                    Text("No hay nada aquí", color = p.text, fontSize = 18.sp, fontWeight = FontWeight.Medium)
                     Spacer(Modifier.height(6.dp))
-                    Text(
-                        text = "Las fotos, audios y archivos que subas a Iris se guardarán aquí.",
-                        color = p.muted,
-                        fontSize = 13.sp
-                    )
+                    Text("Las fotos, audios y archivos que subas a Iris se guardarán aquí.", color = p.muted, fontSize = 13.sp)
                 }
             }
         } else {
@@ -1175,44 +1038,20 @@ private fun IrisGalleryScreen(onBack: () -> Unit) {
                 items(filteredItems, key = { it.id }) { item ->
                     val bitmapResult = if (item.type == "photo") rememberUriBitmap(item.uri, 300) else null
                     Box(
-                        modifier = Modifier
-                            .aspectRatio(1f)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(p.card)
-                            .border(1.dp, p.outline, RoundedCornerShape(12.dp)),
+                        modifier = Modifier.aspectRatio(1f).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surface).border(1.dp, p.outline, RoundedCornerShape(12.dp)),
                         contentAlignment = Alignment.Center
                     ) {
                         val btm = bitmapResult?.bitmap
                         if (btm != null) {
-                            Image(
-                                bitmap = btm,
-                                contentDescription = item.name,
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier.fillMaxSize()
-                            )
+                            Image(btm, item.name, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
                         } else {
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                modifier = Modifier.padding(8.dp)
-                            ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(8.dp)) {
                                 Icon(
-                                    imageVector = when (item.type) {
-                                        "audio" -> Icons.Outlined.AudioFile
-                                        "photo" -> Icons.Outlined.Image
-                                        else -> Icons.Outlined.InsertDriveFile
-                                    },
-                                    contentDescription = null,
-                                    tint = p.accent,
-                                    modifier = Modifier.size(28.dp)
+                                    imageVector = when (item.type) { "audio" -> Icons.Outlined.AudioFile; "photo" -> Icons.Outlined.Image; else -> Icons.Outlined.InsertDriveFile },
+                                    contentDescription = null, tint = p.accent, modifier = Modifier.size(28.dp)
                                 )
                                 Spacer(Modifier.height(4.dp))
-                                Text(
-                                    text = item.name,
-                                    color = p.text,
-                                    fontSize = 11.sp,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis
-                                )
+                                Text(item.name, color = p.text, fontSize = 11.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
                             }
                         }
                     }
@@ -1232,98 +1071,51 @@ private fun loadSavedConversations(context: Context): List<SavedConversation> {
             val msgsJson = obj.optJSONArray("messages") ?: JSONArray()
             val msgs = List(msgsJson.length()) { j ->
                 val m = msgsJson.getJSONObject(j)
-                SavedChatMessage(
-                    text = m.optString("text"),
-                    fromUser = m.optBoolean("fromUser")
-                )
+                SavedChatMessage(m.optString("text"), m.optBoolean("fromUser"))
             }
-            SavedConversation(
-                id = obj.getString("id"),
-                title = obj.getString("title"),
-                updatedAt = obj.optString("updatedAt", ""),
-                messages = msgs
-            )
+            SavedConversation(obj.getString("id"), obj.getString("title"), obj.optString("updatedAt", ""), msgs)
         }
-    } catch (_: Exception) {
-        emptyList()
-    }
+    } catch (_: Exception) { emptyList() }
 }
 
 private fun persistSavedConversations(context: Context, list: List<SavedConversation>) {
     val array = JSONArray()
     list.take(25).forEach { conv ->
         val msgsJson = JSONArray()
-        conv.messages.forEach { msg ->
-            msgsJson.put(
-                JSONObject().apply {
-                    put("text", msg.text)
-                    put("fromUser", msg.fromUser)
-                }
-            )
-        }
-        array.put(
-            JSONObject().apply {
-                put("id", conv.id)
-                put("title", conv.title)
-                put("updatedAt", conv.updatedAt)
-                put("messages", msgsJson)
-            }
-        )
+        conv.messages.forEach { msg -> msgsJson.put(JSONObject().apply { put("text", msg.text); put("fromUser", msg.fromUser) }) }
+        array.put(JSONObject().apply { put("id", conv.id); put("title", conv.title); put("updatedAt", conv.updatedAt); put("messages", msgsJson) })
     }
-    context.getSharedPreferences("iris_history", Context.MODE_PRIVATE)
-        .edit()
-        .putString("conversations", array.toString())
-        .apply()
+    context.getSharedPreferences("iris_history", Context.MODE_PRIVATE).edit().putString("conversations", array.toString()).apply()
 }
 
 @Composable
 private fun DrawerSectionTitle(title: String) {
     val p = LocalIrisPalette.current
-    Text(
-        text = title,
-        color = p.muted,
-        fontSize = 11.sp,
-        modifier = Modifier.padding(top = 22.dp, bottom = 8.dp)
-    )
+    Text(title, color = p.muted, fontSize = 11.sp, modifier = Modifier.padding(top = 22.dp, bottom = 8.dp))
 }
 
 @Composable
 private fun DrawerItem(title: String, icon: ImageVector, onClick: () -> Unit) {
     val p = LocalIrisPalette.current
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .clickable(role = Role.Button, onClick = onClick)
-            .padding(vertical = 12.dp),
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable(role = Role.Button, onClick = onClick).padding(vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(imageVector = icon, contentDescription = null, tint = p.muted, modifier = Modifier.size(20.dp))
+        Icon(icon, null, tint = p.muted, modifier = Modifier.size(20.dp))
         Spacer(Modifier.width(12.dp))
         Text(title, color = p.text, fontSize = 14.sp)
     }
 }
 
 @Composable
-private fun DrawerAction(
-    title: String,
-    subtitle: String,
-    icon: ImageVector,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit
-) {
+private fun DrawerAction(title: String, subtitle: String, icon: ImageVector, modifier: Modifier = Modifier, onClick: () -> Unit) {
     val p = LocalIrisPalette.current
     val shape = RoundedCornerShape(18.dp)
     Row(
-        modifier = modifier
-            .clip(shape)
-            .background(p.card)
-            .border(1.dp, p.outline, shape)
-            .clickable(role = Role.Button, onClick = onClick)
-            .padding(horizontal = 10.dp, vertical = 16.dp),
+        modifier = modifier.clip(shape).background(MaterialTheme.colorScheme.surface).border(1.dp, p.outline, shape).clickable(role = Role.Button, onClick = onClick).padding(horizontal = 10.dp, vertical = 16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(icon, contentDescription = null, tint = p.muted, modifier = Modifier.size(18.dp))
+        Icon(icon, null, tint = p.muted, modifier = Modifier.size(18.dp))
         Spacer(Modifier.width(8.dp))
         Column {
             Text(title, color = p.text, fontSize = 13.sp)
@@ -1344,77 +1136,36 @@ private fun renderIrisLogoWithPrism(): ImageBitmap {
 
     val cat = PathParser.createPathFromPathData(
         """
-        M160 516
-        C181 477 180 423 165 365
-        C151 352 143 334 137 317
-        C124 292 127 265 140 243
-        C119 247 101 239 92 229
-        L84 220
-        Q81 217 85 213
-        L94 201
-        C90 191 89 180 92 166
-        C94 150 104 140 120 134
-        L108 106
-        Q106 102 111 105
-        L151 127
-        L172 86
-        Q174 82 178 86
-        C205 106 218 142 225 176
-        C229 202 246 222 275 236
-        C341 254 388 276 414 349
-        C434 358 440 326 430 286
-        C416 244 381 200 370 157
-        C351 93 387 43 448 27
-        C410 56 398 104 406 139
-        C413 174 446 222 463 266
-        C491 350 457 456 390 522
-        C406 460 374 416 332 392
-        C299 372 263 376 237 395
-        C211 415 195 481 160 516 Z
+        M160 516 C181 477 180 423 165 365 C151 352 143 334 137 317 C124 292 127 265 140 243
+        C119 247 101 239 92 229 L84 220 Q81 217 85 213 L94 201 C90 191 89 180 92 166
+        C94 150 104 140 120 134 L108 106 Q106 102 111 105 L151 127 L172 86 Q174 82 178 86
+        C205 106 218 142 225 176 C229 202 246 222 275 236 C341 254 388 276 414 349
+        C434 358 440 326 430 286 C416 244 381 200 370 157 C351 93 387 43 448 27
+        C410 56 398 104 406 139 C413 174 446 222 463 266 C491 350 457 456 390 522
+        C406 460 374 416 332 392 C299 372 263 376 237 395 C211 415 195 481 160 516 Z
         """.trimIndent()
     )
 
     val eye = PathParser.createPathFromPathData("M113 181 Q121 174 129 175")
 
     val colors = intArrayOf(
-        android.graphics.Color.rgb(255, 105, 108),
-        android.graphics.Color.rgb(255, 173, 98),
-        android.graphics.Color.rgb(248, 233, 131),
-        android.graphics.Color.rgb(132, 233, 165),
-        android.graphics.Color.rgb(118, 231, 238),
-        android.graphics.Color.rgb(123, 158, 255),
-        android.graphics.Color.rgb(190, 141, 250),
-        android.graphics.Color.rgb(238, 160, 227)
+        android.graphics.Color.rgb(255, 105, 108), android.graphics.Color.rgb(255, 173, 98),
+        android.graphics.Color.rgb(248, 233, 131), android.graphics.Color.rgb(132, 233, 165),
+        android.graphics.Color.rgb(118, 231, 238), android.graphics.Color.rgb(123, 158, 255),
+        android.graphics.Color.rgb(190, 141, 250), android.graphics.Color.rgb(238, 160, 227)
     )
 
-    val spectrum = LinearGradient(
-        66.48f, 498.6f, 487.52f, 44.32f,
-        colors,
-        floatArrayOf(0f, .16f, .30f, .45f, .60f, .76f, .90f, 1f),
-        Shader.TileMode.CLAMP
-    )
-
-    val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE
-        strokeCap = Paint.Cap.ROUND
-        strokeJoin = Paint.Join.ROUND
-        shader = spectrum
-    }
+    val spectrum = LinearGradient(66.48f, 498.6f, 487.52f, 44.32f, colors, floatArrayOf(0f, .16f, .30f, .45f, .60f, .76f, .90f, 1f), Shader.TileMode.CLAMP)
+    val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND; shader = spectrum }
 
     fun drawNeon(path: android.graphics.Path, width: Float) {
-        paint.strokeWidth = width * 1.6f
-        paint.alpha = 120
-        paint.maskFilter = BlurMaskFilter(width * .8f, BlurMaskFilter.Blur.NORMAL)
+        paint.strokeWidth = width * 1.6f; paint.alpha = 120; paint.maskFilter = BlurMaskFilter(width * .8f, BlurMaskFilter.Blur.NORMAL)
         canvas.drawPath(path, paint)
-
-        paint.maskFilter = null
-        paint.alpha = 255
-        paint.strokeWidth = width
+        paint.maskFilter = null; paint.alpha = 255; paint.strokeWidth = width
         canvas.drawPath(path, paint)
     }
 
     if (cat != null) drawNeon(cat, 8f)
     if (eye != null) drawNeon(eye, 4f)
-
     return bitmap.asImageBitmap()
 }
