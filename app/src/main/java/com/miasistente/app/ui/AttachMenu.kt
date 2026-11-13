@@ -19,14 +19,17 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
+import androidx.compose.material.icons.filled.Place
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.json.JSONArray
@@ -135,6 +138,8 @@ fun AttachBottomSheet(
     val context = LocalContext.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
     val savedPhotos = remember { loadIrisMedia(context).filter { it.type == "photo" } }
+    
+    var showMapSheet by remember { mutableStateOf(false) }
 
     ModalBottomSheet(
         onDismissRequest = onDismissRequest,
@@ -143,122 +148,171 @@ fun AttachBottomSheet(
         dragHandle = { BottomSheetDefaults.DragHandle(color = p.muted) },
         shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp)
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState())
-                    .padding(bottom = 14.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                AttachBubble("Fotos", Icons.Outlined.Image) {
-                    launchSafeIntent(
-                        context,
-                        Intent(Intent.ACTION_PICK, MediaStore.Images.Media.EXTERNAL_CONTENT_URI)
-                    )
-                    onPhotos()
-                }
-                AttachBubble("Cámara", Icons.Outlined.PhotoCamera) {
-                    launchSafeIntent(context, Intent(MediaStore.ACTION_IMAGE_CAPTURE))
-                    onCamera()
-                }
-                AttachBubble("Archivos", Icons.Outlined.AttachFile, onFiles)
-                AttachBubble("Drive", Icons.Outlined.AddToDrive, onDrive)
-                AttachBubble("Cuadernos", Icons.Outlined.Book, onNotebooks)
-                AttachBubble("Mapa", Icons.Outlined.Map) {
-                    val mapsIntent = Intent(Intent.ACTION_VIEW, Uri.parse("geo:0,0?q=")).apply {
-                        setPackage("com.google.android.apps.maps")
-                    }
-                    if (!launchSafeIntent(context, mapsIntent)) {
-                        launchSafeIntent(context, Intent(Intent.ACTION_VIEW, Uri.parse("https://maps.google.com")))
-                    }
-                    onMap()
-                }
-            }
-
-            val cardShape = RoundedCornerShape(20.dp)
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(cardShape)
-                    .background(p.card)
-                    .border(1.dp, p.outline, cardShape)
-                    .padding(vertical = 4.dp)
-            ) {
-                AttachRowAction("Crea imágenes", "Visualiza y edita", Icons.Outlined.Image) {
-                    onQuickAction("Crea una imagen de ")
-                }
-                AttachRowAction("Crear videos", "Haz que las ideas cobren vida", Icons.Outlined.Videocam) {
-                    onQuickAction("Crea un video de ")
-                }
-                AttachRowAction("Crear música", "Crea pistas de audio", Icons.Outlined.MusicNote) {
-                    onQuickAction("Crea una canción sobre ")
-                }
-                AttachRowAction("Canvas", "Programa, escribe o crea diapositivas.", Icons.Outlined.AddBox) {
-                    onQuickAction("Abre un canvas para ")
-                }
-            }
-
-            Spacer(modifier = Modifier.height(14.dp))
-            Text(
-                text = "Subidos en Iris",
-                color = p.text,
-                fontSize = 14.sp,
-                modifier = Modifier.padding(bottom = 8.dp)
-            )
-
-            if (savedPhotos.isEmpty()) {
-                Box(
+        AnimatedContent(targetState = showMapSheet, label = "attach_or_map") { isMap ->
+            if (isMap) {
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(96.dp)
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(p.card)
-                        .border(1.dp, p.outline, RoundedCornerShape(16.dp)),
-                    contentAlignment = Alignment.Center
+                        .height(460.dp)
+                        .padding(horizontal = 24.dp, vertical = 8.dp)
                 ) {
-                    Text(
-                        text = "No hay nada aquí",
-                        color = p.muted,
-                        fontSize = 13.sp
-                    )
+                    Text("Ubicación", color = p.text, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.height(16.dp))
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(Color(0xFF1E1E1E))
+                            .border(1.dp, p.outline, RoundedCornerShape(20.dp))
+                    ) {
+                        // Simulación del mapa
+                        Column(
+                            modifier = Modifier.align(Alignment.Center),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Icon(
+                                Icons.Default.Place,
+                                contentDescription = "Punto en el mapa",
+                                tint = p.accent,
+                                modifier = Modifier.size(52.dp)
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                text = "Ubicación actual lista",
+                                color = Color.LightGray,
+                                fontSize = 14.sp
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(24.dp))
+                    Button(
+                        onClick = {
+                            showMapSheet = false
+                            onQuickAction("Ubicación enlazada: Barquisimeto, Venezuela ")
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(52.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = p.accent)
+                    ) {
+                        Text("Compartir ubicación", color = Color.White, fontSize = 16.sp)
+                    }
+                    Spacer(Modifier.height(16.dp))
                 }
             } else {
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(3),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(140.dp)
+                        .padding(horizontal = 16.dp)
                 ) {
-                    items(savedPhotos, key = { it.id }) { item ->
-                        val uri = Uri.parse(item.uri)
-                        val bitmapResult = rememberUriBitmap(item.uri, 240)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
+                            .padding(bottom = 14.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        AttachBubble("Fotos", Icons.Outlined.Image) {
+                            launchSafeIntent(
+                                context,
+                                Intent(Intent.ACTION_PICK, MediaStore.Images.Media.EXTERNAL_CONTENT_URI)
+                            )
+                            onPhotos()
+                        }
+                        AttachBubble("Cámara", Icons.Outlined.PhotoCamera) {
+                            launchSafeIntent(context, Intent(MediaStore.ACTION_IMAGE_CAPTURE))
+                            onCamera()
+                        }
+                        AttachBubble("Archivos", Icons.Outlined.AttachFile, onFiles)
+                        AttachBubble("Drive", Icons.Outlined.AddToDrive, onDrive)
+                        AttachBubble("Cuadernos", Icons.Outlined.Book, onNotebooks)
+                        AttachBubble("Mapa", Icons.Outlined.Map) {
+                            showMapSheet = true
+                        }
+                    }
+
+                    val cardShape = RoundedCornerShape(20.dp)
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(cardShape)
+                            .background(p.card)
+                            .border(1.dp, p.outline, cardShape)
+                            .padding(vertical = 4.dp)
+                    ) {
+                        AttachRowAction("Crea imágenes", "Visualiza y edita", Icons.Outlined.Image) {
+                            onQuickAction("Crea una imagen de ")
+                        }
+                        AttachRowAction("Crear videos", "Haz que las ideas cobren vida", Icons.Outlined.Videocam) {
+                            onQuickAction("Crea un video de ")
+                        }
+                        AttachRowAction("Crear música", "Crea pistas de audio", Icons.Outlined.MusicNote) {
+                            onQuickAction("Crea una canción sobre ")
+                        }
+                        AttachRowAction("Canvas", "Programa, escribe o crea diapositivas.", Icons.Outlined.AddBox) {
+                            onQuickAction("Abre un canvas para ")
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+                    Text(
+                        text = "Subidos en Iris",
+                        color = p.text,
+                        fontSize = 14.sp,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+
+                    if (savedPhotos.isEmpty()) {
                         Box(
                             modifier = Modifier
-                                .aspectRatio(1f)
-                                .clip(RoundedCornerShape(8.dp))
+                                .fillMaxWidth()
+                                .height(96.dp)
+                                .clip(RoundedCornerShape(16.dp))
                                 .background(p.card)
-                                .clickable { onPhotoSelected(uri) }
+                                .border(1.dp, p.outline, RoundedCornerShape(16.dp)),
+                            contentAlignment = Alignment.Center
                         ) {
-                            bitmapResult.bitmap?.let { btm ->
-                                Image(
-                                    bitmap = btm,
-                                    contentDescription = item.name,
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier.fillMaxSize()
-                                )
+                            Text(
+                                text = "No hay nada aquí",
+                                color = p.muted,
+                                fontSize = 13.sp
+                            )
+                        }
+                    } else {
+                        LazyVerticalGrid(
+                            columns = GridCells.Fixed(3),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(140.dp)
+                        ) {
+                            items(savedPhotos, key = { it.id }) { item ->
+                                val uri = Uri.parse(item.uri)
+                                val bitmapResult = rememberUriBitmap(item.uri, 240)
+                                Box(
+                                    modifier = Modifier
+                                        .aspectRatio(1f)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(p.card)
+                                        .clickable { onPhotoSelected(uri) }
+                                ) {
+                                    bitmapResult.bitmap?.let { btm ->
+                                        Image(
+                                            bitmap = btm,
+                                            contentDescription = item.name,
+                                            contentScale = ContentScale.Crop,
+                                            modifier = Modifier.fillMaxSize()
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
+                    Spacer(modifier = Modifier.navigationBarsPadding())
                 }
             }
-            Spacer(modifier = Modifier.navigationBarsPadding())
         }
     }
 }
