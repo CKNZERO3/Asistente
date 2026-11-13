@@ -20,10 +20,14 @@ enum class CategoriaTarea {
 
 object IrisModelSelector {
 
-    // gemini-2.5-flash está deprecado y devuelve 404 en proyectos nuevos; 3.6 es la versión estable.
-    const val MODELO_GENERAL = "gemini-3.6-flash"
+    // Cuotas del plan gratuito observadas en AI Studio (peticiones/min · /día):
+    //   gemini-3.5-flash-lite: 15 · 500   -> conversación general y tareas ligeras
+    //   gemini-3.6-flash:       5 ·  20   -> reservado para tareas complejas
+    // gemini-2.5-flash está deprecado (404 en proyectos nuevos). gemini-3.8-flash
+    // sigue permitido en el Worker, pero no se usa hasta conocer su cuota.
+    const val MODELO_GENERAL = "gemini-3.5-flash-lite"
     const val MODELO_LIGERO = "gemini-3.5-flash-lite"
-    const val MODELO_AVANZADO = "gemini-3.8-flash"
+    const val MODELO_AVANZADO = "gemini-3.6-flash"
 
     private val modelosPermitidos = setOf(
         MODELO_GENERAL,

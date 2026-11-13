@@ -42,6 +42,7 @@ class GeminiClient(
         const val MODELO_POR_DEFECTO = IrisModelSelector.MODELO_GENERAL
         private const val BASE = "https://asistente.cristian-nava-ruido.workers.dev/v1beta/models"
         private const val TAG = "IrisGeminiClient"
+        private val cuota = CuotaModelos()
         private const val TIMEOUT_CONEXION_MS = 15_000
         private const val TIMEOUT_LECTURA_MS = 60_000
 
@@ -60,19 +61,30 @@ class GeminiClient(
         val modeloInicial = modeloSolicitado
             .takeIf(IrisModelSelector::esModeloPermitido)
             ?: MODELO_POR_DEFECTO
-        val candidatos = candidatosFallback(modeloInicial)
+        val todos = candidatosFallback(modeloInicial)
+        // Los modelos con la cuota agotada se saltan sin gastar otra petición.
+        val candidatos = todos.filter(cuota::disponible)
+        if (candidatos.isEmpty()) {
+            val espera = todos.minOf(cuota::segundosRestantes)
+            return@withContext Result.failure(
+                HttpException(429, "Cuota agotada temporalmente; reintenta en $espera s.", todos.first())
+            )
+        }
         var ultimoError: Throwable? = null
 
         for (indice in candidatos.indices) {
             val modeloActual = candidatos[indice]
             try {
-                return@withContext Result.success(
-                    llamarConCompatibilidad(pregunta, modeloActual)
-                )
+                val texto = llamarConCompatibilidad(pregunta, modeloActual)
+                cuota.registrarExito(modeloActual)
+                return@withContext Result.success(texto)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: HttpException) {
                 ultimoError = e
+                if (e.codigo == 429 && !e.message.orEmpty().contains("Worker", ignoreCase = true)) {
+                    cuota.registrarAgotada(modeloActual)
+                }
                 val puedeCambiar = indice < candidatos.lastIndex &&
                     debeProbarModeloAlternativo(e)
 
@@ -115,19 +127,10 @@ class GeminiClient(
             IrisModelSelector.MODELO_AVANZADO ->
                 listOf(
                     IrisModelSelector.MODELO_AVANZADO,
-                    IrisModelSelector.MODELO_GENERAL,
-                    IrisModelSelector.MODELO_LIGERO
-                )
-            IrisModelSelector.MODELO_LIGERO ->
-                listOf(
-                    IrisModelSelector.MODELO_LIGERO,
                     IrisModelSelector.MODELO_GENERAL
                 )
             else ->
-                listOf(
-                    IrisModelSelector.MODELO_GENERAL,
-                    IrisModelSelector.MODELO_LIGERO
-                )
+                listOf(IrisModelSelector.MODELO_GENERAL)
         }.distinct()
 
     /**
