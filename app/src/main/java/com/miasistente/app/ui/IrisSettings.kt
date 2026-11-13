@@ -630,7 +630,7 @@ fun DevicesPage(onBack: () -> Unit) {
 }
 
 
-private data class NotebookEntry(
+data class NotebookEntry(
     val id: Int,
     val title: String,
     val body: String,
@@ -880,5 +880,140 @@ fun NotebookDigitalPlanner(
                 Spacer(Modifier.height(32.dp))
             }
         }
+    }
+}
+
+
+@Composable
+fun SettingsTopBar(title: String, onBack: () -> Unit) {
+    val p = LocalIrisPalette.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        IconButton(onClick = onBack) {
+            Icon(Icons.Default.ArrowBack, contentDescription = "Volver", tint = p.text)
+        }
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(title, color = p.text, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+@Composable
+fun SettingsSection(title: String) {
+    val p = LocalIrisPalette.current
+    Text(
+        text = title,
+        color = p.accent,
+        fontSize = 13.sp,
+        fontWeight = FontWeight.SemiBold,
+        modifier = Modifier.padding(start = 16.dp, top = 24.dp, bottom = 8.dp)
+    )
+}
+
+@Composable
+fun SettingsCard(content: @Composable ColumnScope.() -> Unit) {
+    val p = LocalIrisPalette.current
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
+            .background(MaterialTheme.colorScheme.surface)
+            .border(1.dp, p.outline, RoundedCornerShape(20.dp)),
+        content = content
+    )
+}
+
+@Composable
+fun SettingsItem(title: String, subtitle: String? = null, icon: androidx.compose.ui.graphics.vector.ImageVector, onClick: () -> Unit) {
+    val p = LocalIrisPalette.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(icon, contentDescription = null, tint = p.text, modifier = Modifier.size(24.dp))
+        Spacer(Modifier.width(16.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, color = p.text, fontSize = 16.sp)
+            if (subtitle != null) {
+                Text(subtitle, color = p.muted, fontSize = 13.sp)
+            }
+        }
+        Icon(Icons.Default.ChevronRight, contentDescription = null, tint = p.muted)
+    }
+}
+
+@Composable
+fun SettingsToggleItem(title: String, checked: Boolean) {
+    val p = LocalIrisPalette.current
+    var isChecked by remember { mutableStateOf(checked) }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { isChecked = !isChecked }
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(title, color = p.text, fontSize = 16.sp, modifier = Modifier.weight(1f))
+        Switch(
+            checked = isChecked,
+            onCheckedChange = { isChecked = it },
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = Color.White,
+                checkedTrackColor = p.accent,
+                uncheckedThumbColor = p.muted,
+                uncheckedTrackColor = Color(0xFF39304D)
+            )
+        )
+    }
+}
+
+@Composable
+fun SettingsRadioItem(title: String, subtitle: String, selected: Boolean, onClick: () -> Unit) {
+    val p = LocalIrisPalette.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, color = p.text, fontSize = 16.sp)
+            Text(subtitle, color = p.muted, fontSize = 13.sp)
+        }
+        RadioButton(
+            selected = selected,
+            onClick = onClick,
+            colors = RadioButtonDefaults.colors(selectedColor = p.accent, unselectedColor = p.muted)
+        )
+    }
+}
+
+@Composable
+fun SettingsDivider() {
+    val p = LocalIrisPalette.current
+    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = p.outline)
+}
+
+@Composable
+fun SettingsSaveButton(title: String, onClick: () -> Unit) {
+    val p = LocalIrisPalette.current
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(p.accent)
+            .clickable(onClick = onClick)
+            .padding(vertical = 16.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(title, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
     }
 }
