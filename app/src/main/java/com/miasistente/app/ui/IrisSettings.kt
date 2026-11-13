@@ -55,7 +55,9 @@ import kotlinx.coroutines.launch
 @Composable
 fun IrisSettingsScreen(
     darkTheme: Boolean,
+    amoledMode: Boolean,
     onDarkThemeChange: (Boolean) -> Unit,
+    onAmoledChange: (Boolean) -> Unit,
     avatarEnabled: Boolean = false,
     onAvatarChanged: (Boolean) -> Unit = {},
     onBack: () -> Unit,
@@ -93,7 +95,9 @@ fun IrisSettingsScreen(
             )
             "theme" -> ThemeSubmenuPage(
                 darkTheme = darkTheme,
+                amoledMode = amoledMode,
                 onDarkThemeChange = onDarkThemeChange,
+                onAmoledChange = onAmoledChange,
                 onBack = { currentPage = "main" }
             )
             "notifications" -> NotificationsPage(onBack = { currentPage = "main" })
@@ -127,7 +131,7 @@ private fun MainSettingsContent(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(p.background)
+            .background(MaterialTheme.colorScheme.background)
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {}
             .statusBarsPadding()
             .navigationBarsPadding()
@@ -162,35 +166,10 @@ private fun MainSettingsContent(
                         .padding(horizontal = 16.dp, vertical = 14.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(
-                        imageVector = Icons.Outlined.DarkMode,
-                        contentDescription = null,
-                        tint = p.text,
-                        modifier = Modifier.size(24.dp)
-                    )
+                    Icon(Icons.Outlined.DarkMode, null, tint = p.text, modifier = Modifier.size(24.dp))
                     Spacer(Modifier.width(16.dp))
-                    Text(
-                        text = "Tema",
-                        color = p.text,
-                        fontSize = 16.sp,
-                        modifier = Modifier.weight(1f)
-                    )
-                    Text(
-                        text = if (darkTheme) "Oscuro" else "Claro",
-                        color = p.muted,
-                        fontSize = 14.sp
-                    )
-                    Spacer(Modifier.width(10.dp))
-                    DraggableThemeSwitch(
-                        isDark = darkTheme,
-                        onToggle = onDarkThemeChange
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    Icon(
-                        imageVector = Icons.Default.ChevronRight,
-                        contentDescription = null,
-                        tint = p.muted
-                    )
+                    Text("Tema y apariencia", color = p.text, fontSize = 16.sp, modifier = Modifier.weight(1f))
+                    Icon(Icons.Default.ChevronRight, null, tint = p.muted)
                 }
 
                 SettingsDivider()
@@ -202,12 +181,7 @@ private fun MainSettingsContent(
                         .padding(horizontal = 16.dp, vertical = 14.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(
-                        imageVector = Icons.Outlined.ViewInAr,
-                        contentDescription = null,
-                        tint = p.text,
-                        modifier = Modifier.size(24.dp)
-                    )
+                    Icon(Icons.Outlined.ViewInAr, null, tint = p.text, modifier = Modifier.size(24.dp))
                     Spacer(Modifier.width(16.dp))
                     Column(Modifier.weight(1f)) {
                         Text("Avatar 3D", color = p.text, fontSize = 16.sp)
@@ -361,7 +335,9 @@ fun DraggableThemeSwitch(
 @Composable
 fun ThemeSubmenuPage(
     darkTheme: Boolean,
+    amoledMode: Boolean,
     onDarkThemeChange: (Boolean) -> Unit,
+    onAmoledChange: (Boolean) -> Unit,
     onBack: () -> Unit
 ) {
     val p = LocalIrisPalette.current
@@ -378,7 +354,7 @@ fun ThemeSubmenuPage(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(p.background)
+            .background(MaterialTheme.colorScheme.background)
             .statusBarsPadding()
             .navigationBarsPadding()
     ) {
@@ -417,6 +393,36 @@ fun ThemeSubmenuPage(
                 }
 
                 SettingsDivider()
+
+                AnimatedVisibility(visible = darkTheme) {
+                    Column {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onAmoledChange(!amoledMode) }
+                                .padding(horizontal = 16.dp, vertical = 14.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Outlined.Contrast, null, tint = p.text, modifier = Modifier.size(24.dp))
+                            Spacer(Modifier.width(16.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text("Fondo Negro AMOLED", color = p.text, fontSize = 16.sp)
+                                Text("Ahorra batería con negros puros", color = p.muted, fontSize = 13.sp)
+                            }
+                            Switch(
+                                checked = amoledMode,
+                                onCheckedChange = onAmoledChange,
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = Color.White,
+                                    checkedTrackColor = p.accent,
+                                    uncheckedThumbColor = p.muted,
+                                    uncheckedTrackColor = Color(0xFF39304D)
+                                )
+                            )
+                        }
+                        SettingsDivider()
+                    }
+                }
 
                 Row(
                     modifier = Modifier
@@ -458,11 +464,10 @@ fun ThemeSubmenuPage(
                 }
             }
 
-            SettingsSection("Fondo del chat")
+            SettingsSection("Fondos clásicos del chat")
             val wallpapers = listOf(
-                "Iris Noche" to Color(0xFF080C21),
+                "Animado (Por defecto)" to Color(0xFF080C21),
                 "Nebulosa" to Color(0xFF17112C),
-                "Negro AMOLED" to Color(0xFF000000),
                 "Grafito" to Color(0xFF1E1E2E),
                 "Iris Claro" to Color(0xFFF8F6FF),
                 "Lavanda" to Color(0xFFECE6FA),
@@ -508,7 +513,7 @@ fun ThemeSubmenuPage(
                             }
                         }
                         Spacer(Modifier.height(6.dp))
-                        Text(label, color = if (isSelected) p.text else p.muted, fontSize = 12.sp)
+                        Text(label, color = if (isSelected) p.text else p.muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 }
             }
@@ -519,7 +524,7 @@ fun ThemeSubmenuPage(
 @Composable
 fun NotificationsPage(onBack: () -> Unit) {
     val p = LocalIrisPalette.current
-    Column(Modifier.fillMaxSize().background(p.background).statusBarsPadding().navigationBarsPadding()) {
+    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).statusBarsPadding().navigationBarsPadding()) {
         SettingsTopBar("Notificaciones", onBack)
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp)) {
             SettingsCard {
@@ -548,7 +553,7 @@ fun VoicePage(onImportVoice: () -> Unit, onBack: () -> Unit) {
         "Echo" to "Neutra y precisa"
     )
 
-    Column(Modifier.fillMaxSize().background(p.background).statusBarsPadding().navigationBarsPadding()) {
+    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).statusBarsPadding().navigationBarsPadding()) {
         SettingsTopBar("Voz", onBack)
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp)) {
             SettingsCard {
@@ -570,7 +575,7 @@ fun VoicePage(onImportVoice: () -> Unit, onBack: () -> Unit) {
 fun MultimediaPage(onBack: () -> Unit) {
     val p = LocalIrisPalette.current
     var audioQuality by rememberSaveable { mutableStateOf(0.8f) }
-    Column(Modifier.fillMaxSize().background(p.background).statusBarsPadding().navigationBarsPadding()) {
+    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).statusBarsPadding().navigationBarsPadding()) {
         SettingsTopBar("Contenido multimedia", onBack)
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp)) {
             SettingsCard {
@@ -598,7 +603,7 @@ fun MultimediaPage(onBack: () -> Unit) {
 @Composable
 fun DevicesPage(onBack: () -> Unit) {
     val p = LocalIrisPalette.current
-    Column(Modifier.fillMaxSize().background(p.background).statusBarsPadding().navigationBarsPadding()) {
+    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).statusBarsPadding().navigationBarsPadding()) {
         SettingsTopBar("Controles de dispositivos", onBack)
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp)) {
             SettingsCard {
@@ -672,7 +677,7 @@ fun NotebookMockupPage(onBack: () -> Unit) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .background(p.background)
+                .background(MaterialTheme.colorScheme.background)
                 .statusBarsPadding()
                 .navigationBarsPadding()
         ) {
@@ -692,7 +697,7 @@ fun NotebookMockupPage(onBack: () -> Unit) {
                             modifier = Modifier
                                 .aspectRatio(0.78f)
                                 .clip(RoundedCornerShape(18.dp))
-                                .background(p.card)
+                                .background(MaterialTheme.colorScheme.surface)
                                 .border(
                                     width = if (note.pinned) 1.5.dp else 1.dp,
                                     color = if (note.pinned) p.accent else p.outline,
@@ -787,7 +792,7 @@ private fun NotebookEditorPage(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(p.background)
+            .background(MaterialTheme.colorScheme.background)
             .then(if (sheetBg != Color.Transparent) Modifier.background(sheetBg.copy(alpha = 0.65f)) else Modifier)
             .statusBarsPadding()
             .navigationBarsPadding()
@@ -825,7 +830,7 @@ private fun NotebookEditorPage(
                         modifier = Modifier
                             .size(36.dp)
                             .clip(CircleShape)
-                            .background(if (color == Color.Transparent) p.card else color)
+                            .background(if (color == Color.Transparent) MaterialTheme.colorScheme.surface else color)
                             .border(
                                 width = if (note.paperTintIndex == idx) 2.dp else 1.dp,
                                 color = if (note.paperTintIndex == idx) p.accent else p.outline,
@@ -913,7 +918,7 @@ private fun NotebookEditorPage(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(20.dp))
-                        .background(p.card)
+                        .background(MaterialTheme.colorScheme.surface)
                         .border(1.dp, p.outline, RoundedCornerShape(20.dp))
                         .verticalScroll(rememberScrollState())
                         .padding(vertical = 6.dp)
@@ -1002,7 +1007,7 @@ private fun NotebookTopActionBox(
     Column(
         modifier = modifier
             .clip(RoundedCornerShape(18.dp))
-            .background(if (active) p.accent.copy(alpha = 0.18f) else p.card)
+            .background(if (active) p.accent.copy(alpha = 0.18f) else MaterialTheme.colorScheme.surface)
             .border(1.dp, if (active) p.accent else p.outline, RoundedCornerShape(18.dp))
             .clickable(onClick = onClick)
             .padding(vertical = 14.dp),
@@ -1145,7 +1150,7 @@ private fun SettingsCard(content: @Composable ColumnScope.() -> Unit) {
         modifier = Modifier
             .fillMaxWidth()
             .clip(shape)
-            .background(p.card),
+            .background(MaterialTheme.colorScheme.surface),
         content = content
     )
 }
