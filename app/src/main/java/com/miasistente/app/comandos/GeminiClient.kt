@@ -127,6 +127,7 @@ class GeminiClient(
             IrisModelSelector.MODELO_AVANZADO ->
                 listOf(
                     IrisModelSelector.MODELO_AVANZADO,
+                    IrisModelSelector.MODELO_AVANZADO_ALTERNO,
                     IrisModelSelector.MODELO_GENERAL
                 )
             else ->
