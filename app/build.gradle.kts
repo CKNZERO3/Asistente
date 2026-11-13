@@ -127,4 +127,15 @@ dependencies {
     testRuntimeOnly("org.junit.platform:junit-platform-launcher:1.11.3")
     testImplementation("app.cash.turbine:turbine:1.2.0")
     testImplementation("com.google.truth:truth:1.4.4")
+
+	configurations.all {
+   		resolutionStrategy {
+        // Bloqueamos versiones experimentales que rompen la compilación
+        force("org.jetbrains.kotlin:kotlin-stdlib:2.0.21")
+        force("org.jetbrains.kotlin:kotlin-stdlib-jdk7:2.0.21")
+        force("org.jetbrains.kotlin:kotlin-stdlib-jdk8:2.0.21")
+        force("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
+        force("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+   		}
+	}
 }
