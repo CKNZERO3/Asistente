@@ -68,6 +68,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -126,6 +127,7 @@ fun IrisScreen(
     val palette = if (darkTheme) IrisDarkPalette else IrisLightPalette
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
+    val focusManager = LocalFocusManager.current
 
     var message by rememberSaveable { mutableStateOf("") }
     var showSettings by rememberSaveable { mutableStateOf(false) }
@@ -134,21 +136,17 @@ fun IrisScreen(
     var showIrisGallery by rememberSaveable { mutableStateOf(false) }
     var dialog by rememberSaveable { mutableStateOf<String?>(null) }
 
-    // Control de voz inteligente (solo hablar cuando se usó micrófono) y botón de detener
     var lastPromptWasVoice by rememberSaveable { mutableStateOf(false) }
     var showStopVoicePill by remember { mutableStateOf(false) }
 
-    // Transcripción en vivo local con auto-apagado tras silencio
     var liveListening by remember { mutableStateOf(false) }
     var liveTranscript by remember { mutableStateOf<String?>(null) }
     var speechRecognizer by remember { mutableStateOf<SpeechRecognizer?>(null) }
 
-    // Historial local de conversaciones
     var conversations by remember { mutableStateOf(loadSavedConversations(context)) }
     var activeConversationId by rememberSaveable { mutableStateOf("conv_${System.currentTimeMillis()}") }
     var archivedMessages by remember { mutableStateOf<List<SavedChatMessage>?>(null) }
 
-    // Sincronizar la conversación activa en el historial local cuando llegan mensajes
     LaunchedEffect(messages) {
         if (messages.isNotEmpty() && archivedMessages == null) {
             val mapped = messages.map { SavedChatMessage(text = it.text, fromUser = it.fromUser) }
@@ -175,7 +173,6 @@ fun IrisScreen(
         }
     }
 
-    // Mostrar botón "Detener voz" cuando Iris esté hablando o respondiendo a una nota de voz
     LaunchedEffect(isSpeaking, isThinking, lastPromptWasVoice, messages.size) {
         if (isSpeaking) {
             showStopVoicePill = true
@@ -218,6 +215,7 @@ fun IrisScreen(
     }
 
     fun startLiveSpeechRecognition() {
+        focusManager.clearFocus()
         if (liveListening) {
             stopSpeechRecognition()
             return
@@ -238,15 +236,12 @@ fun IrisScreen(
             override fun onReadyForSpeech(params: Bundle?) {
                 liveTranscript = "Escuchando..."
             }
-
             override fun onBeginningOfSpeech() {}
             override fun onRmsChanged(rmsdB: Float) {}
             override fun onBufferReceived(buffer: ByteArray?) {}
-
             override fun onEndOfSpeech() {
                 liveListening = false
             }
-
             override fun onError(error: Int) {
                 val partial = liveTranscript?.takeIf { it != "Escuchando..." }?.trim()
                 stopSpeechRecognition()
@@ -254,7 +249,6 @@ fun IrisScreen(
                     submitUserPrompt(partial, fromVoice = true)
                 }
             }
-
             override fun onResults(results: Bundle?) {
                 val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                 val finalText = matches?.firstOrNull()?.trim()
@@ -264,7 +258,6 @@ fun IrisScreen(
                     submitUserPrompt(finalText, fromVoice = true)
                 }
             }
-
             override fun onPartialResults(partialResults: Bundle?) {
                 val partial = partialResults
                     ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
@@ -274,7 +267,6 @@ fun IrisScreen(
                     liveTranscript = partial
                 }
             }
-
             override fun onEvent(eventType: Int, params: Bundle?) {}
         })
 
@@ -312,13 +304,31 @@ fun IrisScreen(
     fun handle(action: String) {
         when (action) {
             "settings" -> {
+                focusManager.clearFocus()
                 settingsInitialPage = "main"
                 showSettings = true
             }
-            "gallery" -> showIrisGallery = true
+            "gallery" -> {
+                focusManager.clearFocus()
+                showIrisGallery = true
+            }
             "new_chat" -> {
+                focusManager.clearFocus()
                 archivedMessages = null
                 activeConversationId = "conv_${System.currentTimeMillis()}"
+                
+                // Actualización Inmediata del historial
+                val newConv = SavedConversation(
+                    id = activeConversationId,
+                    title = "Nueva conversación",
+                    updatedAt = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date()),
+                    messages = emptyList()
+                )
+                val updatedList = mutableListOf(newConv)
+                updatedList.addAll(conversations.filterNot { it.id == activeConversationId })
+                conversations = updatedList
+                persistSavedConversations(context, updatedList)
+                
                 onAction("new_chat")
             }
             "about", "privacy", "account" -> dialog = action
@@ -383,9 +393,7 @@ fun IrisScreen(
                                     conversations = filtered
                                     persistSavedConversations(context, filtered)
                                     if (activeConversationId == convId) {
-                                        archivedMessages = null
-                                        activeConversationId = "conv_${System.currentTimeMillis()}"
-                                        onAction("new_chat")
+                                        handle("new_chat")
                                     }
                                 },
                                 onAction = ::navigate
@@ -407,8 +415,14 @@ fun IrisScreen(
                         voiceStatus = effectiveStatus,
                         message = message,
                         onMessageChange = { message = it },
-                        onOpenDrawer = { scope.launch { drawerState.open() } },
-                        onAttach = { showAttachMenu = true },
+                        onOpenDrawer = {
+                            focusManager.clearFocus()
+                            scope.launch { drawerState.open() }
+                        },
+                        onAttach = {
+                            focusManager.clearFocus()
+                            showAttachMenu = true
+                        },
                         onVoice = ::handleMicTap,
                         onStopSpeaking = {
                             showStopVoicePill = false
@@ -479,7 +493,7 @@ fun IrisScreen(
                         },
                         onFiles = {
                             showAttachMenu = false
-                            onAttach()
+                            onAction("open_files")
                         },
                         onDrive = {
                             showAttachMenu = false
@@ -492,7 +506,6 @@ fun IrisScreen(
                         },
                         onMap = {
                             showAttachMenu = false
-                            onAction("open_map")
                         },
                         onQuickAction = { action ->
                             showAttachMenu = false
@@ -1070,9 +1083,6 @@ private fun IrisDrawer(
     }
 }
 
-// -------------------------------------------------------------------------
-// PANTALLA DE GALERÍA DE IRIS (CONTENIDO GUARDADO POR EL USUARIO)
-// -------------------------------------------------------------------------
 @Composable
 private fun IrisGalleryScreen(onBack: () -> Unit) {
     val p = LocalIrisPalette.current
