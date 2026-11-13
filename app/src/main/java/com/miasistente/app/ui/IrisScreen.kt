@@ -40,6 +40,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -320,7 +324,7 @@ fun IrisScreen(
         darkColorScheme(
             primary = palette.accent,
             background = if (amoledMode) Color.Black else Color(0xFF080C21),
-            surface = if (amoledMode) Color(0xFF0F0F0F) else Color(0xFF17112C),
+            surface = Color(0xFF17112C),
             onSurface = palette.text,
             onBackground = palette.text
         )
@@ -440,8 +444,7 @@ fun IrisScreen(
                     visible = permissionPrompt != null,
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
-                        .navigationBarsPadding()
-                        .imePadding()
+                        .windowInsetsPadding(WindowInsets.safeDrawing)
                         .padding(start = 20.dp, end = 20.dp, bottom = 88.dp),
                     enter = slideInVertically { it / 2 } + fadeIn(),
                     exit = slideOutVertically { it / 2 } + fadeOut()
@@ -559,9 +562,7 @@ private fun IrisMain(
         modifier = Modifier
             .fillMaxSize()
             .then(bgModifier)
-            .statusBarsPadding()
-            .navigationBarsPadding()
-            .imePadding()
+            .windowInsetsPadding(WindowInsets.safeDrawing)
             .padding(horizontal = 20.dp)
     ) {
         Text(
@@ -890,8 +891,7 @@ private fun IrisDrawer(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
-            .statusBarsPadding()
-            .navigationBarsPadding()
+            .windowInsetsPadding(WindowInsets.systemBars)
             .padding(horizontal = 24.dp, vertical = 20.dp)
     ) {
         Column(modifier = Modifier.weight(1f).verticalScroll(rememberScrollState())) {
@@ -998,7 +998,7 @@ private fun IrisGalleryScreen(onBack: () -> Unit) {
     }
 
     Column(
-        modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).statusBarsPadding().navigationBarsPadding()
+        modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).windowInsetsPadding(WindowInsets.systemBars)
     ) {
         SettingsTopBar("Galería de Iris", onBack)
         Row(
