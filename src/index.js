@@ -33,6 +33,21 @@ function error(estado, mensaje) {
   return respuesta(estado, { error: { message: mensaje } });
 }
 
+// Lee un secreto sin espacios ni saltos de línea sobrantes (un salto pegado
+// junto con la clave hace fallar el encabezado y rompe la petición).
+function secreto(env, nombre) {
+  const valor = env[nombre];
+  return typeof valor === "string" ? valor.trim() : "";
+}
+
+// Diagnóstico temporal: indica qué secreto falta y los NOMBRES (nunca los
+// valores) de lo que el Worker sí recibe. Se quitará cuando todo funcione.
+function faltaSecreto(env, nombre) {
+  const vistos = Object.keys(env).sort().join(", ") || "ninguna";
+  console.error("Falta el secreto " + nombre + ". Variables vistas: " + vistos);
+  return error(500, "Servicio no disponible: falta " + nombre + " (variables vistas: " + vistos + ")");
+}
+
 function iguales(a, b) {
   const enc = new TextEncoder();
   const x = enc.encode(a);
@@ -93,7 +108,7 @@ async function reconocerMusica(request, env) {
   }
 
   const salida = new FormData();
-  salida.set("api_token", env.AUDD_API_TOKEN);
+  salida.set("api_token", secreto(env, "AUDD_API_TOKEN"));
   salida.set("return", "spotify,apple_music");
   salida.set("file", archivo, archivo.name || "audio.mp3");
 
@@ -142,7 +157,7 @@ async function consultarGemini(request, env, ruta) {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "x-goog-api-key": env.GEMINI_API_KEY
+      "x-goog-api-key": secreto(env, "GEMINI_API_KEY")
     },
     body: JSON.stringify(cuerpo)
   });
@@ -196,21 +211,15 @@ export default {
       }
 
       // 3) Verificar secretos.
-      if (esAudd && !env.AUDD_API_TOKEN) {
-        console.error("Falta el secreto AUDD_API_TOKEN");
-        return error(500, "Servicio no disponible");
-      }
-      if (esGemini && !env.GEMINI_API_KEY) {
-        console.error("Falta el secreto GEMINI_API_KEY");
-        return error(500, "Servicio no disponible");
-      }
+      if (esAudd && !secreto(env, "AUDD_API_TOKEN")) return faltaSecreto(env, "AUDD_API_TOKEN");
+      if (esGemini && !secreto(env, "GEMINI_API_KEY")) return faltaSecreto(env, "GEMINI_API_KEY");
 
       return esAudd
         ? await reconocerMusica(request, env)
         : await consultarGemini(request, env, ruta);
     } catch (e) {
       console.error("Error interno del Worker:", e);
-      return error(500, "Error interno del servicio");
+      return error(500, "Error interno del servicio (" + (e && e.name ? e.name : "desconocido") + ")");
     }
   }
 };
