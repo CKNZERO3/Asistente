@@ -562,8 +562,7 @@ private fun IrisMain(
         modifier = Modifier
             .fillMaxSize()
             .then(bgModifier)
-            .windowInsetsPadding(WindowInsets.safeDrawing)
-            .padding(horizontal = 20.dp)
+            .padding(horizontal = 20.dp, vertical = 12.dp)
     ) {
         Text(
             text = "Iris",
@@ -896,7 +895,7 @@ private fun IrisDrawer(
     ) {
         Column(modifier = Modifier.weight(1f).verticalScroll(rememberScrollState())) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                IrisLogo(Modifier.size(28.dp))
+                IrisSolidLogo(Modifier.size(28.dp))
                 Spacer(Modifier.width(10.dp))
                 Text("Iris", color = p.text, fontSize = 24.sp)
             }
@@ -1168,5 +1167,42 @@ private fun renderIrisLogoWithPrism(): ImageBitmap {
 
     if (cat != null) drawNeon(cat, 8f)
     if (eye != null) drawNeon(eye, 4f)
+    return bitmap.asImageBitmap()
+}
+
+@Composable
+fun IrisSolidLogo(modifier: Modifier = Modifier) {
+    val image = remember { renderIrisSolidLogo() }
+    Image(bitmap = image, contentDescription = "Iris Logo", modifier = modifier)
+}
+
+private fun renderIrisSolidLogo(): ImageBitmap {
+    val bitmap = Bitmap.createBitmap(554, 554, Bitmap.Config.ARGB_8888)
+    val canvas = android.graphics.Canvas(bitmap)
+
+    val cat = PathParser.createPathFromPathData(
+        "M160 516 C181 477 180 423 165 365 C151 352 143 334 137 317 C124 292 127 265 140 243 C119 247 101 239 92 229 L84 220 Q81 217 85 213 L94 201 C90 191 89 180 92 166 C94 150 104 140 120 134 L108 106 Q106 102 111 105 L151 127 L172 86 Q174 82 178 86 C205 106 218 142 225 176 C229 202 246 222 275 236 C341 254 388 276 414 349 C434 358 440 326 430 286 C416 244 381 200 370 157 C351 93 387 43 448 27 C410 56 398 104 406 139 C413 174 446 222 463 266 C491 350 457 456 390 522 C406 460 374 416 332 392 C299 372 263 376 237 395 C211 415 195 481 160 516 Z"
+    )
+
+    val eye = PathParser.createPathFromPathData("M113 181 Q121 174 129 175")
+
+    val colors = intArrayOf(
+        android.graphics.Color.rgb(255, 105, 108), android.graphics.Color.rgb(255, 173, 98),
+        android.graphics.Color.rgb(248, 233, 131), android.graphics.Color.rgb(132, 233, 165),
+        android.graphics.Color.rgb(118, 231, 238), android.graphics.Color.rgb(123, 158, 255),
+        android.graphics.Color.rgb(190, 141, 250), android.graphics.Color.rgb(238, 160, 227)
+    )
+
+    val spectrum = LinearGradient(66.48f, 498.6f, 487.52f, 44.32f, colors, floatArrayOf(0f, .16f, .30f, .45f, .60f, .76f, .90f, 1f), Shader.TileMode.CLAMP)
+    val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { 
+        style = Paint.Style.STROKE 
+        strokeCap = Paint.Cap.ROUND 
+        strokeJoin = Paint.Join.ROUND 
+        shader = spectrum
+        strokeWidth = 24f // Grosor solido y sin sombra negra
+    }
+
+    if (cat != null) canvas.drawPath(cat, paint)
+    if (eye != null) canvas.drawPath(eye, paint)
     return bitmap.asImageBitmap()
 }
