@@ -528,7 +528,7 @@ fun ThemeSubmenuPage(
 @Composable
 fun NotificationsPage(onBack: () -> Unit) {
     val p = LocalIrisPalette.current
-    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).windowInsetsPadding(WindowInsets.systemBars)) {
+    Column(Modifier.fillMaxSize().background(if(amoledMode) Color.Black else MaterialTheme.colorScheme.background).windowInsetsPadding(WindowInsets.systemBars)) {
         SettingsTopBar("Notificaciones", onBack)
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp)) {
             SettingsCard {
@@ -557,7 +557,7 @@ fun VoicePage(onImportVoice: () -> Unit, onBack: () -> Unit) {
         "Echo" to "Neutra y precisa"
     )
 
-    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).windowInsetsPadding(WindowInsets.systemBars)) {
+    Column(Modifier.fillMaxSize().background(if(amoledMode) Color.Black else MaterialTheme.colorScheme.background).windowInsetsPadding(WindowInsets.systemBars)) {
         SettingsTopBar("Voz", onBack)
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp)) {
             SettingsCard {
@@ -579,7 +579,7 @@ fun VoicePage(onImportVoice: () -> Unit, onBack: () -> Unit) {
 fun MultimediaPage(onBack: () -> Unit) {
     val p = LocalIrisPalette.current
     var audioQuality by rememberSaveable { mutableStateOf(0.8f) }
-    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).windowInsetsPadding(WindowInsets.systemBars)) {
+    Column(Modifier.fillMaxSize().background(if(amoledMode) Color.Black else MaterialTheme.colorScheme.background).windowInsetsPadding(WindowInsets.systemBars)) {
         SettingsTopBar("Contenido multimedia", onBack)
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp)) {
             SettingsCard {
@@ -607,7 +607,7 @@ fun MultimediaPage(onBack: () -> Unit) {
 @Composable
 fun DevicesPage(onBack: () -> Unit) {
     val p = LocalIrisPalette.current
-    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).windowInsetsPadding(WindowInsets.systemBars)) {
+    Column(Modifier.fillMaxSize().background(if(amoledMode) Color.Black else MaterialTheme.colorScheme.background).windowInsetsPadding(WindowInsets.systemBars)) {
         SettingsTopBar("Controles de dispositivos", onBack)
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp)) {
             SettingsCard {
@@ -622,6 +622,7 @@ fun DevicesPage(onBack: () -> Unit) {
     }
 }
 
+
 private data class NotebookEntry(
     val id: Int,
     val title: String,
@@ -629,582 +630,247 @@ private data class NotebookEntry(
     val date: String,
     val pinned: Boolean = false,
     val locked: Boolean = false,
-    val paperTintIndex: Int = 0
+    val paperType: String = "Líneas"
 )
 
 @Composable
 fun NotebookMockupPage(onBack: () -> Unit) {
-    val p = LocalIrisPalette.current
-    val focusManager = LocalFocusManager.current
-    
+    var openedNoteId by rememberSaveable { mutableStateOf<Int?>(null) }
     var notes by remember {
         mutableStateOf(
             listOf(
-                NotebookEntry(
-                    id = 1,
-                    title = "Cuaderno de ejemplo",
-                    body = "Aquí puedes organizar tus apuntes, ideas rápidas y resúmenes con Iris.",
-                    date = "12/11/2026"
-                )
+                NotebookEntry(1, "Notas Personales", "", "12/11/2026", paperType = "Líneas"),
+                NotebookEntry(2, "Proyecto de App", "", "13/11/2026", paperType = "Puntos")
             )
         )
     }
-    var openedNoteId by rememberSaveable { mutableStateOf<Int?>(null) }
 
-    val openedNote = notes.find { it.id == openedNoteId }
+    val p = LocalIrisPalette.current
 
-    BackHandler(enabled = openedNote != null) {
-        focusManager.clearFocus()
-        openedNoteId = null
-    }
-
-    if (openedNote != null) {
-        NotebookEditorPage(
-            note = openedNote,
-            onUpdate = { updated ->
-                notes = notes.map { if (it.id == updated.id) updated else it }
-            },
-            onDelete = { id ->
+    if (openedNoteId != null) {
+        val note = notes.find { it.id == openedNoteId } ?: return
+        NotebookDigitalPlanner(
+            note = note,
+            allNotes = notes,
+            onUpdate = { updated -> notes = notes.map { if (it.id == updated.id) updated else it } },
+            onDelete = { id -> 
                 notes = notes.filterNot { it.id == id }
-                openedNoteId = null
+                openedNoteId = null 
             },
-            onBack = {
-                focusManager.clearFocus()
-                openedNoteId = null
-            }
+            onNavigate = { newId -> openedNoteId = newId },
+            onBack = { openedNoteId = null }
         )
     } else {
-        val sortedNotes = remember(notes) {
-            notes.sortedByDescending { it.pinned }
-        }
-
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .background(MaterialTheme.colorScheme.background)
-                .statusBarsPadding()
-                .navigationBarsPadding()
         ) {
-            SettingsTopBar("Iris Notebook", onBack)
-
-            Box(Modifier.weight(1f).fillMaxWidth()) {
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(2),
-                    contentPadding = PaddingValues(16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                    modifier = Modifier.fillMaxSize()
-                ) {
-                    items(sortedNotes.size, key = { sortedNotes[it].id }) { index ->
-                        val note = sortedNotes[index]
-                        Column(
-                            modifier = Modifier
-                                .aspectRatio(0.78f)
-                                .clip(RoundedCornerShape(18.dp))
-                                .background(MaterialTheme.colorScheme.surface)
-                                .border(
-                                    width = if (note.pinned) 1.5.dp else 1.dp,
-                                    color = if (note.pinned) p.accent else p.outline,
-                                    shape = RoundedCornerShape(18.dp)
-                                )
-                                .clickable { openedNoteId = note.id }
-                                .padding(14.dp)
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    text = note.title,
-                                    color = p.text,
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.weight(1f)
-                                )
-                                if (note.pinned) {
-                                    Icon(Icons.Outlined.PushPin, null, tint = p.accent, modifier = Modifier.size(14.dp))
-                                }
-                                if (note.locked) {
-                                    Spacer(Modifier.width(4.dp))
-                                    Icon(Icons.Outlined.Lock, null, tint = p.muted, modifier = Modifier.size(14.dp))
-                                }
-                            }
+            SettingsTopBar("Mis Cuadernos", onBack)
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(2),
+                contentPadding = PaddingValues(16.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.weight(1f)
+            ) {
+                items(notes.size, key = { notes[it].id }) { idx ->
+                    val note = notes[idx]
+                    Box(
+                        modifier = Modifier
+                            .aspectRatio(0.7f)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color(0xFFE2E0D8)) // Tapa del cuaderno
+                            .border(1.dp, p.outline, RoundedCornerShape(12.dp))
+                            .clickable { openedNoteId = note.id }
+                    ) {
+                        // Lomo
+                        Box(Modifier.fillMaxHeight().width(24.dp).background(Color(0xFF333333)).align(Alignment.CenterStart))
+                        Column(modifier = Modifier.padding(start = 36.dp, top = 16.dp, end = 12.dp)) {
+                            Text(note.title, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.Black)
                             Spacer(Modifier.height(8.dp))
-                            Text(
-                                text = note.body,
-                                color = p.muted,
-                                fontSize = 12.sp,
-                                maxLines = 5,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f)
-                            )
-                            Text(note.date, color = p.muted, fontSize = 10.sp)
+                            Text("Última mod: ${note.date}", fontSize = 10.sp, color = Color.DarkGray)
                         }
                     }
                 }
-
-                Box(
-                    modifier = Modifier
-                        .padding(24.dp)
-                        .size(56.dp)
-                        .clip(CircleShape)
-                        .background(p.accent)
-                        .align(Alignment.BottomEnd)
-                        .clickable {
-                            val nextId = (notes.maxOfOrNull { it.id } ?: 0) + 1
-                            val created = NotebookEntry(
-                                id = nextId,
-                                title = "Nuevo cuaderno $nextId",
-                                body = "Escribe tus notas aquí...",
-                                date = "12/11/2026"
-                            )
-                            notes = notes + created
-                            openedNoteId = nextId
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(Icons.Default.Add, contentDescription = "Crear cuaderno", tint = Color.White)
-                }
+            }
+            Box(
+                modifier = Modifier.fillMaxWidth().padding(16.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Button(
+                    onClick = {
+                        val nextId = (notes.maxOfOrNull { it.id } ?: 0) + 1
+                        val created = NotebookEntry(nextId, "Nuevo tema $nextId", "", "Hoy")
+                        notes = notes + created
+                        openedNoteId = nextId
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = p.accent)
+                ) { Text("Crear Cuaderno") }
             }
         }
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun NotebookEditorPage(
+fun NotebookDigitalPlanner(
     note: NotebookEntry,
+    allNotes: List<NotebookEntry>,
     onUpdate: (NotebookEntry) -> Unit,
     onDelete: (Int) -> Unit,
+    onNavigate: (Int) -> Unit,
     onBack: () -> Unit
 ) {
-    val p = LocalIrisPalette.current
     var title by remember(note.id) { mutableStateOf(note.title) }
     var body by remember(note.id) { mutableStateOf(note.body) }
-    var showMoreSheet by remember { mutableStateOf(false) }
-    var showThemePicker by remember { mutableStateOf(false) }
-    var showRenameDialog by remember { mutableStateOf(false) }
+    var showMenu by remember { mutableStateOf(false) }
+    val p = LocalIrisPalette.current
 
-    val paperColors = listOf(
-        Color.Transparent,
-        Color(0xFF1B1636),
-        Color(0xFF14242B),
-        Color(0xFF281926),
-        Color(0xFFF3EEFF)
+    val paperColors = listOf(Color(0xFFFFFFFF), Color(0xFFF9F7E8))
+    
+    val tabColors = listOf(
+        Color(0xFFB5E6D8), Color(0xFFFFD1D1), Color(0xFFE5D4ED), 
+        Color(0xFFFFF0B3), Color(0xFFD4E4FF), Color(0xFFFFCFA1)
     )
-    val sheetBg = paperColors.getOrElse(note.paperTintIndex) { Color.Transparent }
 
-    val baseBg = if (p.isDark) Color(0xFF080C21) else Color(0xFFF8F6FF)
-    val lineColor = p.outline.copy(alpha = 0.3f)
-    Column(
+    Row(
         modifier = Modifier
             .fillMaxSize()
-            .background(baseBg)
-            .then(if (sheetBg != Color.Transparent) Modifier.background(sheetBg.copy(alpha = 0.65f)) else Modifier)
-            .drawBehind {
-                if (sheetBg == Color.Transparent) {
-                    val lineSpacing = 28.dp.toPx()
-                    var y = 140.dp.toPx()
-                    while (y < size.height) {
-                        drawLine(
-                            color = lineColor,
-                            start = androidx.compose.ui.geometry.Offset(0f, y),
-                            end = androidx.compose.ui.geometry.Offset(size.width, y),
-                            strokeWidth = 1.dp.toPx()
-                        )
-                        y += lineSpacing
-                    }
-                }
-            }
-            .windowInsetsPadding(WindowInsets.safeDrawing)
+            .background(Color(0xFFE8E5DD)) // Fondo base del planner
+            .padding(top = 16.dp, bottom = 16.dp, start = 12.dp, end = 4.dp)
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            IconButton(onClick = {
-                onUpdate(note.copy(title = title, body = body))
-                onBack()
-            }) {
-                Icon(Icons.Default.ArrowBack, contentDescription = "Volver", tint = p.text)
-            }
-            Spacer(Modifier.weight(1f))
-            IconButton(onClick = { showThemePicker = !showThemePicker }) {
-                Icon(Icons.Outlined.Checkroom, contentDescription = "Temas", tint = p.text)
-            }
-            IconButton(onClick = { showMoreSheet = true }) {
-                Icon(Icons.Default.MoreVert, contentDescription = "Más opciones", tint = p.text)
-            }
-        }
-
-        if (showThemePicker) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                paperColors.forEachIndexed { idx, color ->
-                    Box(
-                        modifier = Modifier
-                            .size(36.dp)
-                            .clip(CircleShape)
-                            .background(if (color == Color.Transparent) MaterialTheme.colorScheme.surface else color)
-                            .border(
-                                width = if (note.paperTintIndex == idx) 2.dp else 1.dp,
-                                color = if (note.paperTintIndex == idx) p.accent else p.outline,
-                                shape = CircleShape
-                            )
-                            .clickable {
-                                onUpdate(note.copy(title = title, body = body, paperTintIndex = idx))
-                            }
-                    )
-                }
-            }
-        }
-
+        // Area central de papel
         Column(
             modifier = Modifier
                 .weight(1f)
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 22.dp, vertical = 12.dp)
-        ) {
-            BasicTextField(
-                value = title,
-                onValueChange = {
-                    title = it
-                    onUpdate(note.copy(title = it, body = body))
-                },
-                textStyle = TextStyle(color = p.text, fontSize = 24.sp, fontWeight = FontWeight.Bold),
-                cursorBrush = SolidColor(p.accent),
-                modifier = Modifier.fillMaxWidth()
-            )
-            Spacer(Modifier.height(14.dp))
-            BasicTextField(
-                value = body,
-                onValueChange = {
-                    body = it
-                    onUpdate(note.copy(title = title, body = it))
-                },
-                textStyle = TextStyle(color = p.text, fontSize = 16.sp, lineHeight = 24.sp),
-                cursorBrush = SolidColor(p.accent),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .defaultMinSize(minHeight = 320.dp)
-            )
-        }
-    }
-
-    if (showMoreSheet) {
-        ModalBottomSheet(
-            onDismissRequest = { showMoreSheet = false },
-            containerColor = MaterialTheme.colorScheme.background,
-            dragHandle = { BottomSheetDefaults.DragHandle(color = p.muted) },
-            shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    NotebookTopActionBox(
-                        label = if (note.pinned) "Fijado" else "Fijar",
-                        icon = Icons.Outlined.PushPin,
-                        active = note.pinned,
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        onUpdate(note.copy(title = title, body = body, pinned = !note.pinned))
-                        showMoreSheet = false
-                    }
-                    NotebookTopActionBox(
-                        label = if (note.locked) "Bloqueado" else "Bloquear",
-                        icon = if (note.locked) Icons.Outlined.Lock else Icons.Outlined.LockOpen,
-                        active = note.locked,
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        onUpdate(note.copy(title = title, body = body, locked = !note.locked))
-                        showMoreSheet = false
-                    }
-                }
-
-                Spacer(Modifier.height(14.dp))
-
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(MaterialTheme.colorScheme.surface)
-                        .border(1.dp, p.outline, RoundedCornerShape(20.dp))
-                        .verticalScroll(rememberScrollState())
-                        .padding(vertical = 6.dp)
-                ) {
-                    NotebookSheetRow("Temas", Icons.Outlined.Checkroom) {
-                        showMoreSheet = false
-                        showThemePicker = true
-                    }
-                    NotebookSheetRow("Editar nombre", Icons.Outlined.Edit) {
-                        showMoreSheet = false
-                        showRenameDialog = true
-                    }
-                    NotebookSheetRow("Compartir", Icons.Outlined.Share) {
-                        showMoreSheet = false
-                    }
-                    NotebookSheetRow("Recordatorio", Icons.Outlined.Schedule) {
-                        showMoreSheet = false
-                    }
-                    NotebookSheetRow("Agregar a pantalla principal", Icons.Outlined.AddHome) {
-                        showMoreSheet = false
-                    }
-                    NotebookSheetRow("Mover cuaderno", Icons.Outlined.DriveFileMove) {
-                        showMoreSheet = false
-                    }
-                    NotebookSheetRow(
-                        label = if (note.locked) "Eliminar (Bloqueado)" else "Eliminar cuaderno",
-                        icon = Icons.Outlined.Delete,
-                        tint = if (note.locked) p.muted else Color(0xFFFF5252)
-                    ) {
-                        if (!note.locked) {
-                            showMoreSheet = false
-                            onDelete(note.id)
+                .fillMaxHeight()
+                .clip(RoundedCornerShape(topStart = 16.dp, bottomStart = 16.dp))
+                .background(paperColors[0]) // Papel blanco/crema
+                .drawBehind {
+                    val lineColor = Color(0xFFD3D3D3)
+                    when (note.paperType) {
+                        "Líneas" -> {
+                            val spacing = 32.dp.toPx()
+                            var y = 100.dp.toPx()
+                            while (y < size.height) {
+                                drawLine(color = lineColor, start = androidx.compose.ui.geometry.Offset(0f, y), end = androidx.compose.ui.geometry.Offset(size.width, y), strokeWidth = 2f)
+                                y += spacing
+                            }
+                        }
+                        "Cuadrícula" -> {
+                            val spacing = 24.dp.toPx()
+                            var y = spacing
+                            while (y < size.height) {
+                                drawLine(color = lineColor, start = androidx.compose.ui.geometry.Offset(0f, y), end = androidx.compose.ui.geometry.Offset(size.width, y), strokeWidth = 2f)
+                                y += spacing
+                            }
+                            var x = spacing
+                            while (x < size.width) {
+                                drawLine(color = lineColor, start = androidx.compose.ui.geometry.Offset(x, 0f), end = androidx.compose.ui.geometry.Offset(x, size.height), strokeWidth = 2f)
+                                x += spacing
+                            }
+                        }
+                        "Puntos" -> {
+                            val spacing = 24.dp.toPx()
+                            var y = spacing
+                            while (y < size.height) {
+                                var x = spacing
+                                while (x < size.width) {
+                                    drawCircle(color = lineColor, radius = 2f, center = androidx.compose.ui.geometry.Offset(x, y))
+                                    x += spacing
+                                }
+                                y += spacing
+                            }
                         }
                     }
                 }
-
-                Spacer(Modifier.height(12.dp))
-                Text(
-                    text = "Creado el: ${note.date}",
-                    color = p.muted,
-                    fontSize = 12.sp,
-                    modifier = Modifier.align(Alignment.CenterHorizontally)
+        ) {
+            // Cabecera interna del cuaderno
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = { 
+                    onUpdate(note.copy(title = title, body = body))
+                    onBack() 
+                }) {
+                    Icon(Icons.Outlined.Home, contentDescription = "Inicio", tint = Color.Black)
+                }
+                BasicTextField(
+                    value = title,
+                    onValueChange = { title = it; onUpdate(note.copy(title = it, body = body)) },
+                    textStyle = TextStyle(color = Color.Black, fontSize = 24.sp, fontWeight = FontWeight.Bold),
+                    modifier = Modifier.weight(1f).padding(start = 8.dp)
                 )
-                Spacer(Modifier.navigationBarsPadding())
+                IconButton(onClick = { showMenu = !showMenu }) {
+                    Icon(Icons.Default.MoreVert, "Menú", tint = Color.Black)
+                }
             }
-        }
-    }
 
-    if (showRenameDialog) {
-        var tempName by remember { mutableStateOf(title) }
-        AlertDialog(
-            onDismissRequest = { showRenameDialog = false },
-            title = { Text("Editar nombre") },
-            text = {
-                OutlinedTextField(
-                    value = tempName,
-                    onValueChange = { tempName = it },
-                    singleLine = true
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    if (tempName.isNotBlank()) {
-                        title = tempName.trim()
-                        onUpdate(note.copy(title = title, body = body))
-                    }
-                    showRenameDialog = false
-                }) { Text("Guardar", color = p.accent) }
-            },
-            dismissButton = {
-                TextButton(onClick = { showRenameDialog = false }) { Text("Cancelar", color = p.muted) }
-            }
-        )
-    }
-}
-
-@Composable
-private fun NotebookTopActionBox(
-    label: String,
-    icon: ImageVector,
-    active: Boolean,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit
-) {
-    val p = LocalIrisPalette.current
-    Column(
-        modifier = modifier
-            .clip(RoundedCornerShape(18.dp))
-            .background(if (active) p.accent.copy(alpha = 0.18f) else MaterialTheme.colorScheme.surface)
-            .border(1.dp, if (active) p.accent else p.outline, RoundedCornerShape(18.dp))
-            .clickable(onClick = onClick)
-            .padding(vertical = 14.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Icon(icon, contentDescription = null, tint = if (active) p.accent else p.text)
-        Spacer(Modifier.height(6.dp))
-        Text(label, color = if (active) p.accent else p.text, fontSize = 13.sp)
-    }
-}
-
-@Composable
-private fun NotebookSheetRow(
-    label: String,
-    icon: ImageVector,
-    tint: Color? = null,
-    onClick: () -> Unit
-) {
-    val p = LocalIrisPalette.current
-    val contentColor = tint ?: p.text
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(horizontal = 20.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(icon, contentDescription = null, tint = contentColor, modifier = Modifier.size(22.dp))
-        Spacer(Modifier.width(16.dp))
-        Text(label, color = contentColor, fontSize = 16.sp)
-    }
-}
-
-@Composable
-fun SettingsTopBar(title: String, onBack: () -> Unit) {
-    val p = LocalIrisPalette.current
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 8.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        IconButton(onClick = onBack) {
-            Icon(Icons.Default.ArrowBack, contentDescription = "Volver", tint = p.text)
-        }
-        Text(title, color = p.text, fontSize = 20.sp, modifier = Modifier.padding(start = 16.dp))
-    }
-}
-
-@Composable
-fun SettingsSaveButton(text: String, onClick: () -> Unit) {
-    val p = LocalIrisPalette.current
-    Button(
-        onClick = onClick,
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(16.dp)
-            .height(50.dp),
-        colors = ButtonDefaults.buttonColors(containerColor = p.accent)
-    ) {
-        Text(text, color = Color.White, fontSize = 16.sp)
-    }
-}
-
-@Composable
-private fun SettingsToggleItem(title: String, checked: Boolean) {
-    val p = LocalIrisPalette.current
-    var isChecked by rememberSaveable { mutableStateOf(checked) }
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { isChecked = !isChecked }
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(title, color = p.text, fontSize = 16.sp, modifier = Modifier.weight(1f))
-        Switch(
-            checked = isChecked,
-            onCheckedChange = { isChecked = it },
-            colors = SwitchDefaults.colors(
-                checkedThumbColor = Color.White,
-                checkedTrackColor = p.accent,
-                uncheckedThumbColor = if (p.isDark) p.muted else Color.White,
-                uncheckedTrackColor = if (p.isDark) Color(0xFF39304D) else Color(0xFFD9D1EE)
+            // Cuerpo del cuaderno
+            BasicTextField(
+                value = body,
+                onValueChange = { body = it; onUpdate(note.copy(title = title, body = it)) },
+                textStyle = TextStyle(color = Color(0xFF333333), fontSize = 18.sp, lineHeight = 28.sp),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 24.dp, vertical = 8.dp)
             )
-        )
-    }
-}
-
-@Composable
-private fun SettingsRadioItem(
-    title: String,
-    subtitle: String,
-    selected: Boolean,
-    onClick: () -> Unit
-) {
-    val p = LocalIrisPalette.current
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(
-            imageVector = Icons.Default.GraphicEq,
-            contentDescription = null,
-            tint = if (selected) p.accent else p.muted,
-            modifier = Modifier.size(22.dp)
-        )
-        Spacer(Modifier.width(14.dp))
-        Column(Modifier.weight(1f)) {
-            Text(title, color = p.text, fontSize = 16.sp)
-            Text(subtitle, color = p.muted, fontSize = 13.sp)
         }
-        RadioButton(
-            selected = selected,
-            onClick = onClick,
-            colors = RadioButtonDefaults.colors(selectedColor = p.accent, unselectedColor = p.muted)
-        )
-    }
-}
 
-@Composable
-private fun SettingsSection(title: String) {
-    val p = LocalIrisPalette.current
-    Text(
-        text = title,
-        color = p.muted,
-        fontSize = 14.sp,
-        modifier = Modifier.padding(start = 16.dp, top = 24.dp, bottom = 8.dp)
-    )
-}
-
-@Composable
-private fun SettingsCard(content: @Composable ColumnScope.() -> Unit) {
-    val p = LocalIrisPalette.current
-    val shape = RoundedCornerShape(24.dp)
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(shape)
-            .background(MaterialTheme.colorScheme.surface),
-        content = content
-    )
-}
-
-@Composable
-private fun SettingsDivider() {
-    val p = LocalIrisPalette.current
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp)
-            .height(1.dp)
-            .background(p.outline.copy(alpha = 0.5f))
-    )
-}
-
-@Composable
-private fun SettingsItem(title: String, subtitle: String?, icon: ImageVector, onClick: () -> Unit) {
-    val p = LocalIrisPalette.current
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(role = Role.Button, onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 16.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(icon, contentDescription = null, tint = p.text, modifier = Modifier.size(24.dp))
-        Spacer(Modifier.width(16.dp))
-        Column(Modifier.weight(1f)) {
-            Text(title, color = p.text, fontSize = 16.sp)
-            if (subtitle != null) {
-                Text(subtitle, color = p.muted, fontSize = 14.sp)
+        // Solapas Laterales (Tabs)
+        Column(
+            modifier = Modifier.width(36.dp).fillMaxHeight().padding(vertical = 32.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            allNotes.take(12).forEachIndexed { idx, tabNote ->
+                val isActive = tabNote.id == note.id
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(if (isActive) 52.dp else 42.dp)
+                        .clip(RoundedCornerShape(topEnd = 8.dp, bottomEnd = 8.dp))
+                        .background(tabColors[idx % tabColors.size])
+                        .clickable { onNavigate(tabNote.id) },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("${idx + 1}", color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
             }
         }
-        Icon(Icons.Default.ChevronRight, contentDescription = null, tint = p.muted)
+    }
+
+    if (showMenu) {
+        ModalBottomSheet(
+            onDismissRequest = { showMenu = false },
+            containerColor = MaterialTheme.colorScheme.surface
+        ) {
+            Column(Modifier.fillMaxWidth().padding(16.dp)) {
+                Text("Tipo de papel", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = p.text)
+                Row(Modifier.fillMaxWidth().padding(vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf("Lisa", "Líneas", "Cuadrícula", "Puntos").forEach { type ->
+                        val selected = note.paperType == type
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (selected) p.accent else MaterialTheme.colorScheme.background)
+                                .clickable { onUpdate(note.copy(title = title, body = body, paperType = type)) }
+                                .padding(horizontal = 12.dp, vertical = 8.dp)
+                        ) {
+                            Text(type, color = if (selected) Color.White else p.text, fontSize = 13.sp)
+                        }
+                    }
+                }
+                Spacer(Modifier.height(16.dp))
+                Button(
+                    onClick = { onDelete(note.id); showMenu = false },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF5252)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Eliminar cuaderno", color = Color.White)
+                }
+                Spacer(Modifier.height(32.dp))
+            }
+        }
     }
 }
