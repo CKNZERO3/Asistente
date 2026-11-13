@@ -5,6 +5,7 @@ import android.content.Intent
 import android.net.Uri
 import android.provider.MediaStore
 import android.provider.OpenableColumns
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -17,7 +18,6 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.animation.AnimatedContent
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material.icons.filled.Place
@@ -164,10 +164,9 @@ fun AttachBottomSheet(
                             .weight(1f)
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(20.dp))
-                            .background(Color(0xFF1E1E1E))
+                            .background(MaterialTheme.colorScheme.surface)
                             .border(1.dp, p.outline, RoundedCornerShape(20.dp))
                     ) {
-                        // Simulación del mapa
                         Column(
                             modifier = Modifier.align(Alignment.Center),
                             horizontalAlignment = Alignment.CenterHorizontally
@@ -238,7 +237,7 @@ fun AttachBottomSheet(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(cardShape)
-                            .background(p.card)
+                            .background(MaterialTheme.colorScheme.surface)
                             .border(1.dp, p.outline, cardShape)
                             .padding(vertical = 4.dp)
                     ) {
@@ -270,7 +269,7 @@ fun AttachBottomSheet(
                                 .fillMaxWidth()
                                 .height(96.dp)
                                 .clip(RoundedCornerShape(16.dp))
-                                .background(p.card)
+                                .background(MaterialTheme.colorScheme.surface)
                                 .border(1.dp, p.outline, RoundedCornerShape(16.dp)),
                             contentAlignment = Alignment.Center
                         ) {
@@ -296,7 +295,7 @@ fun AttachBottomSheet(
                                     modifier = Modifier
                                         .aspectRatio(1f)
                                         .clip(RoundedCornerShape(8.dp))
-                                        .background(p.card)
+                                        .background(MaterialTheme.colorScheme.surface)
                                         .clickable { onPhotoSelected(uri) }
                                 ) {
                                     bitmapResult.bitmap?.let { btm ->
@@ -342,7 +341,7 @@ private fun AttachBubble(label: String, icon: ImageVector, onClick: () -> Unit) 
             modifier = Modifier
                 .size(56.dp)
                 .clip(CircleShape)
-                .background(p.card)
+                .background(MaterialTheme.colorScheme.surface)
                 .border(1.dp, p.outline, CircleShape),
             contentAlignment = Alignment.Center
         ) {
