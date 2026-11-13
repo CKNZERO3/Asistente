@@ -219,6 +219,12 @@ private fun MainSettingsContent(
             SettingsSection("Datos y privacidad")
             SettingsCard {
                 SettingsItem("Importar memoria", null, Icons.Outlined.UploadFile) { onAction("import") }
+                SettingsDivider()
+                SettingsItem(
+                    "Importar modelo de IA local",
+                    "Archivo .litertlm (p. ej. Gemma 3 1B). Resume y responde tareas ligeras sin gastar cuota de Gemini.",
+                    Icons.Outlined.UploadFile
+                ) { onAction("import_model") }
             }
             Spacer(Modifier.height(32.dp))
         }

@@ -28,6 +28,8 @@ import androidx.lifecycle.repeatOnLifecycle
 import com.miasistente.app.auth.GoogleSignInManager
 import com.miasistente.app.auth.GoogleSignInResult
 import com.miasistente.app.comandos.EjecutorLocal
+import com.miasistente.app.comandos.ModeloLocal
+import com.miasistente.app.comandos.PoliticaArchivos
 import com.miasistente.app.comandos.ProcesadorComandos
 import com.miasistente.app.dominio.AssistantState
 import com.miasistente.app.service.AsistenteService
@@ -62,6 +64,12 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.GetContent()
     ) { uri ->
         if (uri != null) agregarAdjunto(uri)
+    }
+
+    private val pickModel = registerForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri ->
+        if (uri != null) importarModeloLocal(uri)
     }
 
     private val pedirPermisosVoz = registerForActivityResult(
@@ -162,10 +170,30 @@ class MainActivity : ComponentActivity() {
         chat.addUser(texto)
         chat.updateThinking(true)
 
+        // "Resume el archivo": se usa el último adjunto que no sea una imagen.
+        val adjuntoParaResumir = if (PoliticaArchivos.pideResumirArchivo(texto)) {
+            chat.messages.lastOrNull { it.attachment != null && !it.attachment.isImage }?.attachment
+        } else {
+            null
+        }
+
         lifecycleScope.launch {
             AsistenteService.updateAssistantState(AssistantState.THINKING)
             try {
-                val resultado = withContext(Dispatchers.IO) { procesador.procesar(texto) }
+                val resultado = withContext(Dispatchers.IO) {
+                    if (adjuntoParaResumir != null) {
+                        val lectura = PoliticaArchivos.leer(
+                            contentResolver,
+                            Uri.parse(adjuntoParaResumir.uri),
+                            adjuntoParaResumir.name,
+                            adjuntoParaResumir.mime,
+                            adjuntoParaResumir.sizeBytes
+                        )
+                        procesador.resumirArchivo(adjuntoParaResumir.name, lectura)
+                    } else {
+                        procesador.procesar(texto)
+                    }
+                }
                 val respuestaFinal = resultado.mensaje.ifBlank { "Listo." }
                 chat.addAssistant(respuestaFinal)
                 vozAsistente.hablar(respuestaFinal)
@@ -204,6 +232,22 @@ class MainActivity : ComponentActivity() {
             }
         } catch (_: Exception) {}
         return ChatAttachment(uri.toString(), nombre, mime, tamano)
+    }
+
+    private fun importarModeloLocal(uri: Uri) {
+        lifecycleScope.launch {
+            val archivo = withContext(Dispatchers.IO) { leerAdjunto(uri) }
+            if (!archivo.name.endsWith(".litertlm", ignoreCase = true)) {
+                aviso("Elige un archivo de modelo con extensión .litertlm")
+                return@launch
+            }
+            aviso("Importando el modelo… puede tardar un minuto")
+            val resultado = ModeloLocal(applicationContext).importar(uri, archivo.sizeBytes)
+            aviso(
+                if (resultado.isSuccess) "IA local lista"
+                else resultado.exceptionOrNull()?.message ?: "No pude importar el modelo"
+            )
+        }
     }
 
     private fun tienePermisoMicrofono(): Boolean =
@@ -287,6 +331,7 @@ class MainActivity : ComponentActivity() {
             "support" -> enviarCorreoSoporte()
             "sign_out" -> cerrarSesion()
             "sign_in" -> iniciarSesionGoogle()
+            "import_model" -> pickModel.launch("*/*")
             "search" -> aviso("Búsqueda próximamente")
             "gallery" -> aviso("Galería próximamente")
         }

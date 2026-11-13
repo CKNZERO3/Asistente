@@ -22,17 +22,19 @@ object IrisModelSelector {
 
     // Cuotas del plan gratuito observadas en AI Studio (peticiones/min · /día):
     //   gemini-3.5-flash-lite: 15 · 500   -> conversación general y tareas ligeras
-    //   gemini-3.6-flash:       5 ·  20   -> reservado para tareas complejas
-    // gemini-2.5-flash está deprecado (404 en proyectos nuevos). gemini-3.8-flash
-    // sigue permitido en el Worker, pero no se usa hasta conocer su cuota.
+    //   gemini-3.6-flash:       5 ·  20   -> tareas complejas
+    //   gemini-3.8-flash:       5 ·  20   -> alterno para tareas complejas (suma otras 20 al día)
+    // gemini-2.5-flash está deprecado (404 en proyectos nuevos).
     const val MODELO_GENERAL = "gemini-3.5-flash-lite"
     const val MODELO_LIGERO = "gemini-3.5-flash-lite"
     const val MODELO_AVANZADO = "gemini-3.6-flash"
+    const val MODELO_AVANZADO_ALTERNO = "gemini-3.8-flash"
 
     private val modelosPermitidos = setOf(
         MODELO_GENERAL,
         MODELO_LIGERO,
-        MODELO_AVANZADO
+        MODELO_AVANZADO,
+        MODELO_AVANZADO_ALTERNO
     )
 
     private const val MAX_CARACTERES_TAREA_LIGERA = 1_500

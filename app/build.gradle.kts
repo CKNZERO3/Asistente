@@ -106,6 +106,9 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
 
+    // IA local (modelo pequeño que corre en el teléfono). Versión fija verificada contra el código oficial.
+    implementation("com.google.ai.edge.litertlm:litertlm-android:0.19.1")
+
     // Kotlin Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")

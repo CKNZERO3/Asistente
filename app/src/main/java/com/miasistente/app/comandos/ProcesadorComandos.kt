@@ -16,6 +16,7 @@ class ProcesadorComandos(context: Context) {
     private val gemini = GeminiClient()
     private val habilidades = HabilidadesLocales()
     private val clima = ClimaOpenMeteo()
+    private val modeloLocal = ModeloLocal(context)
     private val ajustes = Ajustes(appContext)
 
     suspend fun procesar(
@@ -91,7 +92,41 @@ class ProcesadorComandos(context: Context) {
     private suspend fun responderConsulta(pregunta: String): ResultadoComando {
         habilidades.responder(pregunta)?.let { return ResultadoComando(true, it) }
         habilidades.peticionClima(pregunta)?.let { return consultarClima(it) }
+
+        // Tareas ligeras (resumir, traducir, corregir…): primero la IA del teléfono.
+        // Si no está instalada o falla, se sigue con Gemini.
+        val seleccion = IrisModelSelector.seleccionar(pregunta)
+        if (seleccion.categoria == CategoriaTarea.LIGERA && modeloLocal.disponible()) {
+            modeloLocal.generar(INSTRUCCION_LOCAL, pregunta)
+                .onSuccess { return ResultadoComando(true, it) }
+        }
         return consultarIris(pregunta)
+    }
+
+    /**
+     * Resume un archivo de texto adjunto. Hasta [PoliticaArchivos.MAX_CARACTERES_LOCAL]
+     * caracteres lo hace el modelo del teléfono; hasta [PoliticaArchivos.MAX_CARACTERES_NUBE],
+     * Gemini; más que eso se rechaza.
+     */
+    suspend fun resumirArchivo(nombre: String, lectura: LecturaArchivo): ResultadoComando {
+        val contenido = when (lectura) {
+            is LecturaArchivo.Rechazado -> return ResultadoComando(false, lectura.motivo)
+            is LecturaArchivo.Texto -> lectura.contenido.trim()
+        }
+        if (contenido.isEmpty()) return ResultadoComando(false, "«$nombre» está vacío.")
+        if (contenido.length > PoliticaArchivos.MAX_CARACTERES_NUBE) {
+            return ResultadoComando(
+                false,
+                "«$nombre» es demasiado largo para resumirlo (límite: ${PoliticaArchivos.MAX_CARACTERES_NUBE} caracteres)."
+            )
+        }
+
+        val peticion = "Resume en español, de forma breve y clara, el siguiente archivo («$nombre»):\n\n$contenido"
+        if (contenido.length <= PoliticaArchivos.MAX_CARACTERES_LOCAL && modeloLocal.disponible()) {
+            modeloLocal.generar(INSTRUCCION_LOCAL, peticion)
+                .onSuccess { return ResultadoComando(true, it) }
+        }
+        return consultarIris(peticion, IrisModelSelector.MODELO_LIGERO)
     }
 
     private suspend fun consultarClima(peticion: PeticionClima): ResultadoComando {
@@ -116,14 +151,14 @@ class ProcesadorComandos(context: Context) {
         }
     }
 
-    private suspend fun consultarIris(pregunta: String): ResultadoComando {
+    private suspend fun consultarIris(pregunta: String, modelo: String? = null): ResultadoComando {
         if (!Conectividad.hayInternet(appContext)) {
             return ResultadoComando(false, "Ahora mismo no tengo conexión a internet.")
         }
 
-        val seleccion = IrisModelSelector.seleccionar(pregunta)
+        val elegido = modelo ?: IrisModelSelector.seleccionar(pregunta).modelo
 
-        return gemini.preguntar(pregunta, seleccion.modelo).fold(
+        return gemini.preguntar(pregunta, elegido).fold(
             onSuccess = { ResultadoComando(true, it) },
             onFailure = { ResultadoComando(false, mensajeAmigable(it)) }
         )
