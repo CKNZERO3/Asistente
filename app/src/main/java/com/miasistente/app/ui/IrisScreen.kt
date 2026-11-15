@@ -74,7 +74,6 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.TextStyle
@@ -84,7 +83,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.core.graphics.PathParser
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
@@ -122,6 +120,8 @@ fun IrisScreen(
     micPulse: Boolean = false,
     voiceStatus: String? = null,
     permissionPrompt: PermissionPrompt? = null,
+    pendingAttachment: ChatAttachment? = null,
+    onClearAttachment: () -> Unit = {},
     onPermissionConfirm: () -> Unit = {},
     onPermissionDismiss: () -> Unit = {},
     onAvatarChanged: (Boolean) -> Unit = {},
@@ -161,6 +161,7 @@ fun IrisScreen(
         if (messages.isNotEmpty() && archivedMessages == null) {
             val mapped = messages.map { SavedChatMessage(text = it.text, fromUser = it.fromUser) }
             val firstUserText = mapped.firstOrNull { it.fromUser && it.text.isNotBlank() }?.text
+                ?: messages.firstOrNull { it.attachment != null }?.attachment?.name
                 ?: "Nueva conversación"
             val title = if (firstUserText.length > 34) firstUserText.take(34) + "…" else firstUserText
             val now = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
@@ -184,14 +185,15 @@ fun IrisScreen(
     }
 
     LaunchedEffect(isSpeaking, isThinking, lastPromptWasVoice, messages.size) {
-        if (isSpeaking) {
+        val ultimoMensaje = messages.lastOrNull()
+        val esError = ultimoMensaje != null && !ultimoMensaje.fromUser && esMensajeDeError(ultimoMensaje.text)
+        if (isSpeaking && !esError) {
             showStopVoicePill = true
-        } else if (lastPromptWasVoice && !isThinking && messages.lastOrNull()?.fromUser == false) {
-            showStopVoicePill = true
-            delay(8000)
+        } else {
             showStopVoicePill = false
-        } else if (!lastPromptWasVoice) {
-            showStopVoicePill = false
+            if (!isThinking && !isSpeaking) {
+                lastPromptWasVoice = false
+            }
         }
     }
 
@@ -211,7 +213,7 @@ fun IrisScreen(
 
     fun submitUserPrompt(rawText: String, fromVoice: Boolean) {
         val clean = rawText.trim()
-        if (clean.isEmpty()) return
+        if (clean.isEmpty() && pendingAttachment == null) return
         archivedMessages = null
         lastPromptWasVoice = fromVoice
         onAction(if (fromVoice) "tts_voice_mode" else "tts_text_mode")
@@ -389,6 +391,8 @@ fun IrisScreen(
                         micPulse = liveListening || micPulse,
                         voiceStatus = effectiveStatus,
                         message = message,
+                        pendingAttachment = pendingAttachment,
+                        onClearAttachment = onClearAttachment,
                         darkTheme = darkTheme,
                         amoledMode = amoledMode,
                         onMessageChange = { message = it },
@@ -405,7 +409,7 @@ fun IrisScreen(
                             showStopVoicePill = false
                             lastPromptWasVoice = false
                             outerOnStopSpeaking()
-                            onAction("stop_external_agent_voice") 
+                            onAction("stop_speaking")
                         },
                         onSend = { submitUserPrompt(message, fromVoice = false) }
                     )
@@ -472,6 +476,7 @@ fun IrisScreen(
                         onFiles = {
                             showAttachMenu = false
                             onAction("open_files")
+                            onAttach()
                         },
                         onDrive = {
                             showAttachMenu = false
@@ -484,6 +489,7 @@ fun IrisScreen(
                         },
                         onMap = {
                             showAttachMenu = false
+                            onAction("use_gps_location")
                         },
                         onQuickAction = { action ->
                             showAttachMenu = false
@@ -491,7 +497,6 @@ fun IrisScreen(
                         },
                         onPhotoSelected = { uri ->
                             showAttachMenu = false
-                            saveUriToIrisMedia(context, uri, "photo")
                             onPhotoSelected(uri)
                         }
                     )
@@ -502,6 +507,17 @@ fun IrisScreen(
             BackHandler(enabled = showSettings && !showIrisGallery) { showSettings = false }
         }
     }
+}
+
+private fun esMensajeDeError(texto: String): Boolean {
+    val t = texto.trim()
+    return t.startsWith("Estoy atendiendo") ||
+        t.startsWith("No pude ") ||
+        t.startsWith("Ahora mismo no tengo") ||
+        t.startsWith("Mi servicio de inteligencia") ||
+        t.startsWith("Tuve un problema") ||
+        t.startsWith("No tengo autorización") ||
+        t.startsWith("Error:")
 }
 
 @Composable
@@ -526,6 +542,8 @@ private fun IrisMain(
     micPulse: Boolean,
     voiceStatus: String?,
     message: String,
+    pendingAttachment: ChatAttachment?,
+    onClearAttachment: () -> Unit,
     darkTheme: Boolean,
     amoledMode: Boolean,
     onMessageChange: (String) -> Unit,
@@ -537,7 +555,7 @@ private fun IrisMain(
 ) {
     val p = LocalIrisPalette.current
     val hasContent = archivedMessages != null || messages.isNotEmpty()
-    
+
     val infiniteTransition = rememberInfiniteTransition(label = "bg_anim")
     val c1 by infiniteTransition.animateColor(
         initialValue = Color(0xFF070B1C),
@@ -551,7 +569,7 @@ private fun IrisMain(
         animationSpec = infiniteRepeatable(tween(4500, easing = LinearEasing), RepeatMode.Reverse),
         label = "c2"
     )
-    
+
     val bgModifier = if (darkTheme && !amoledMode) {
         Modifier.background(Brush.linearGradient(listOf(c1, c2)))
     } else {
@@ -630,8 +648,17 @@ private fun IrisMain(
             )
         }
 
+        if (pendingAttachment != null) {
+            PendingAttachmentChip(
+                attachment = pendingAttachment,
+                onRemove = onClearAttachment,
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
+        }
+
         IrisComposer(
             value = message,
+            hasAttachment = pendingAttachment != null,
             onValueChange = onMessageChange,
             micActive = micActive,
             micPulse = micPulse,
@@ -641,6 +668,51 @@ private fun IrisMain(
         )
 
         Spacer(Modifier.height(14.dp))
+    }
+}
+
+@Composable
+private fun PendingAttachmentChip(
+    attachment: ChatAttachment,
+    onRemove: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val p = LocalIrisPalette.current
+    val shape = RoundedCornerShape(16.dp)
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(MaterialTheme.colorScheme.surface)
+            .border(1.dp, p.accent.copy(alpha = 0.55f), shape)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            imageVector = if (attachment.isImage) Icons.Outlined.Image else Icons.Outlined.Description,
+            contentDescription = null,
+            tint = p.accent,
+            modifier = Modifier.size(20.dp)
+        )
+        Spacer(Modifier.width(10.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = attachment.name,
+                color = p.text,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = if (attachment.isImage) "Imagen adjunta" else "Archivo listo para analizar o resumir",
+                color = p.muted,
+                fontSize = 11.sp
+            )
+        }
+        IconButton(onClick = onRemove, modifier = Modifier.size(28.dp)) {
+            Icon(Icons.Default.Close, contentDescription = "Quitar adjunto", tint = p.muted, modifier = Modifier.size(16.dp))
+        }
     }
 }
 
@@ -661,7 +733,7 @@ private fun IrisWelcome(userName: String?, isLightMode: Boolean) {
             ambientShadowColor = Color.Black
             spotShadowColor = Color.Black
         } else Modifier
-        
+
         IrisLogo(modifier = Modifier.size(108.dp).then(shadowModifier))
         Spacer(Modifier.height(26.dp))
         Text(
@@ -775,6 +847,7 @@ private fun ChatBubble(
 @Composable
 private fun IrisComposer(
     value: String,
+    hasAttachment: Boolean = false,
     onValueChange: (String) -> Unit,
     micActive: Boolean,
     micPulse: Boolean,
@@ -784,7 +857,7 @@ private fun IrisComposer(
 ) {
     val p = LocalIrisPalette.current
     val shape = RoundedCornerShape(28.dp)
-    val hasText = value.isNotBlank()
+    val canSend = value.isNotBlank() || hasAttachment
 
     Row(
         modifier = Modifier
@@ -817,7 +890,7 @@ private fun IrisComposer(
         )
 
         AnimatedContent(
-            targetState = hasText,
+            targetState = canSend,
             transitionSpec = {
                 (fadeIn(animationSpec = tween(150)) + scaleIn(initialScale = 0.85f))
                     .togetherWith(fadeOut(animationSpec = tween(150)) + scaleOut(targetScale = 0.85f))
@@ -1194,12 +1267,12 @@ private fun renderIrisSolidLogo(): ImageBitmap {
     )
 
     val spectrum = LinearGradient(66.48f, 498.6f, 487.52f, 44.32f, colors, floatArrayOf(0f, .16f, .30f, .45f, .60f, .76f, .90f, 1f), Shader.TileMode.CLAMP)
-    val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { 
-        style = Paint.Style.STROKE 
-        strokeCap = Paint.Cap.ROUND 
-        strokeJoin = Paint.Join.ROUND 
+    val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
         shader = spectrum
-        strokeWidth = 24f // Grosor solido y sin sombra negra
+        strokeWidth = 24f
     }
 
     if (cat != null) canvas.drawPath(cat, paint)
