@@ -22,17 +22,20 @@ object IrisModelSelector {
 
     // Cuotas del plan gratuito observadas en AI Studio (peticiones/min · /día):
     //   gemini-3.5-flash-lite: 15 · 500   -> conversación general y tareas ligeras
+    //   gemini-3.1-flash-lite: 15 · 500   -> alterno para conversación general y tareas ligeras
     //   gemini-3.6-flash:       5 ·  20   -> tareas complejas
     //   gemini-3.8-flash:       5 ·  20   -> alterno para tareas complejas (suma otras 20 al día)
     // gemini-2.5-flash está deprecado (404 en proyectos nuevos).
     const val MODELO_GENERAL = "gemini-3.5-flash-lite"
     const val MODELO_LIGERO = "gemini-3.5-flash-lite"
+    const val MODELO_LIGERO_ALTERNO = "gemini-3.1-flash-lite"
     const val MODELO_AVANZADO = "gemini-3.6-flash"
     const val MODELO_AVANZADO_ALTERNO = "gemini-3.8-flash"
 
     private val modelosPermitidos = setOf(
         MODELO_GENERAL,
         MODELO_LIGERO,
+        MODELO_LIGERO_ALTERNO,
         MODELO_AVANZADO,
         MODELO_AVANZADO_ALTERNO
     )
@@ -44,7 +47,8 @@ object IrisModelSelector {
     )
 
     private val tareasLigeras = Regex(
-        """\b(resume|resumir|resumen|traduce|traducir|traduccion|corrige|corregir|correccion|extrae|extraer|clasifica|clasificar|reformula|reescribe|simplifica|simplificar|define|definir|definicion)\b"""
+        """\b(resume|resumir|resumen|traduce|traducir|traduccion|corrige|corregir|correccion|extrae|extraer|clasifica|clasificar|reformula|reescribe|simplifica|simplificar|define|definir|definicion|sinonimo|sinonimos|antonimo|antonimos|ortografia)\b|""" +
+            """\b(como se dice|en ingles|en espanol|en frances|en portugues|en italiano|en aleman)\b"""
     )
 
     fun seleccionar(pregunta: String): SeleccionModelo {
@@ -66,7 +70,7 @@ object IrisModelSelector {
             return SeleccionModelo(
                 modelo = MODELO_LIGERO,
                 categoria = CategoriaTarea.LIGERA,
-                motivo = "La solicitud es una transformación de texto acotada."
+                motivo = "La solicitud es una transformación o consulta breve."
             )
         }
 
