@@ -87,28 +87,35 @@ class ProcesadorComandos(context: Context) {
 
     /**
      * Antes de gastar cuota de Gemini se intenta resolver la consulta en el teléfono
-     * (hora, fecha, cálculos) o con un servicio gratuito (clima).
+     * (hora, fecha, cálculos), con un servicio gratuito (clima) o con Gemma 3 1B local.
      */
     private suspend fun responderConsulta(pregunta: String): ResultadoComando {
         habilidades.responder(pregunta)?.let { return ResultadoComando(true, it) }
         habilidades.peticionClima(pregunta)?.let { return consultarClima(it) }
 
-        // Tareas ligeras (resumir, traducir, corregir…): primero la IA del teléfono.
-        // Si no está instalada o falla, se sigue con Gemini.
         val seleccion = IrisModelSelector.seleccionar(pregunta)
-        if (seleccion.categoria == CategoriaTarea.LIGERA && modeloLocal.disponible()) {
+        val usarLocalPrimero = modeloLocal.disponible() && (
+            seleccion.categoria == CategoriaTarea.LIGERA ||
+                (seleccion.categoria == CategoriaTarea.GENERAL && pregunta.length <= MAX_CHARS_GENERAL_LOCAL)
+            )
+
+        if (usarLocalPrimero) {
             modeloLocal.generar(INSTRUCCION_LOCAL, pregunta)
                 .onSuccess { return ResultadoComando(true, it) }
         }
-        return consultarIris(pregunta)
+        return consultarIris(pregunta, seleccion.modelo, intentarLocalSiFalla = !usarLocalPrimero)
     }
 
     /**
-     * Resume un archivo de texto adjunto. Hasta [PoliticaArchivos.MAX_CARACTERES_LOCAL]
+     * Resume o analiza un archivo de texto adjunto. Hasta [PoliticaArchivos.MAX_CARACTERES_LOCAL]
      * caracteres lo hace el modelo del teléfono; hasta [PoliticaArchivos.MAX_CARACTERES_NUBE],
      * Gemini; más que eso se rechaza.
      */
-    suspend fun resumirArchivo(nombre: String, lectura: LecturaArchivo): ResultadoComando {
+    suspend fun resumirArchivo(
+        nombre: String,
+        lectura: LecturaArchivo,
+        instruccionUsuario: String? = null
+    ): ResultadoComando {
         val contenido = when (lectura) {
             is LecturaArchivo.Rechazado -> return ResultadoComando(false, lectura.motivo)
             is LecturaArchivo.Texto -> lectura.contenido.trim()
@@ -121,12 +128,16 @@ class ProcesadorComandos(context: Context) {
             )
         }
 
-        val peticion = "Resume en español, de forma breve y clara, el siguiente archivo («$nombre»):\n\n$contenido"
-        if (contenido.length <= PoliticaArchivos.MAX_CARACTERES_LOCAL && modeloLocal.disponible()) {
+        val indicacion = instruccionUsuario?.trim()?.takeIf { it.isNotEmpty() }
+            ?: "Resume en español, de forma breve y clara, el siguiente archivo"
+        val peticion = "$indicacion («$nombre»):\n\n$contenido"
+
+        val cabeEnLocal = contenido.length <= PoliticaArchivos.MAX_CARACTERES_LOCAL && modeloLocal.disponible()
+        if (cabeEnLocal) {
             modeloLocal.generar(INSTRUCCION_LOCAL, peticion)
                 .onSuccess { return ResultadoComando(true, it) }
         }
-        return consultarIris(peticion, IrisModelSelector.MODELO_LIGERO)
+        return consultarIris(peticion, IrisModelSelector.MODELO_LIGERO, intentarLocalSiFalla = !cabeEnLocal)
     }
 
     private suspend fun consultarClima(peticion: PeticionClima): ResultadoComando {
@@ -151,8 +162,16 @@ class ProcesadorComandos(context: Context) {
         }
     }
 
-    private suspend fun consultarIris(pregunta: String, modelo: String? = null): ResultadoComando {
+    private suspend fun consultarIris(
+        pregunta: String,
+        modelo: String? = null,
+        intentarLocalSiFalla: Boolean = true
+    ): ResultadoComando {
         if (!Conectividad.hayInternet(appContext)) {
+            if (intentarLocalSiFalla && modeloLocal.disponible()) {
+                modeloLocal.generar(INSTRUCCION_LOCAL, pregunta)
+                    .onSuccess { return ResultadoComando(true, it) }
+            }
             return ResultadoComando(false, "Ahora mismo no tengo conexión a internet.")
         }
 
@@ -160,7 +179,13 @@ class ProcesadorComandos(context: Context) {
 
         return gemini.preguntar(pregunta, elegido).fold(
             onSuccess = { ResultadoComando(true, it) },
-            onFailure = { ResultadoComando(false, mensajeAmigable(it)) }
+            onFailure = { errorNube ->
+                if (intentarLocalSiFalla && modeloLocal.disponible()) {
+                    modeloLocal.generar(INSTRUCCION_LOCAL, pregunta)
+                        .onSuccess { return ResultadoComando(true, it) }
+                }
+                ResultadoComando(false, mensajeAmigable(errorNube))
+            }
         )
     }
 
@@ -186,5 +211,9 @@ class ProcesadorComandos(context: Context) {
             "No pude preparar una respuesta esta vez. ¿Puedes intentarlo de otra manera?"
         else ->
             "No pude completar la consulta. Inténtalo de nuevo."
+    }
+
+    private companion object {
+        const val MAX_CHARS_GENERAL_LOCAL = 500
     }
 }
