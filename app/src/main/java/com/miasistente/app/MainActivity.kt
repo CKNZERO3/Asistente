@@ -35,6 +35,7 @@ import com.miasistente.app.comandos.EjecutorLocal
 import com.miasistente.app.comandos.ModeloLocal
 import com.miasistente.app.comandos.PoliticaArchivos
 import com.miasistente.app.comandos.ProcesadorComandos
+import com.miasistente.app.comandos.ResultadoComando
 import com.miasistente.app.dominio.AssistantState
 import com.miasistente.app.service.AsistenteService
 import com.miasistente.app.service.VozAsistente
@@ -44,13 +45,21 @@ import com.miasistente.app.ui.ChatViewModel
 import com.miasistente.app.ui.IrisScreen
 import com.miasistente.app.ui.PermissionKind
 import com.miasistente.app.ui.PermissionPrompt
+import com.miasistente.app.ui.SavedChatAttachment
+import com.miasistente.app.ui.SavedChatMessage
+import com.miasistente.app.ui.SavedConversation
+import com.miasistente.app.ui.loadSavedConversations
+import com.miasistente.app.ui.persistSavedConversations
 import com.miasistente.app.ui.saveUriToIrisMedia
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 import java.io.FileOutputStream
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 
 class MainActivity : ComponentActivity() {
@@ -68,6 +77,10 @@ class MainActivity : ComponentActivity() {
     private var darkTheme by mutableStateOf(true)
     private var permissionPrompt by mutableStateOf<PermissionPrompt?>(null)
     private var pendingAttachment by mutableStateOf<ChatAttachment?>(null)
+
+    private var conversations by mutableStateOf<List<SavedConversation>>(emptyList())
+    private var activeConversationId by mutableStateOf("conv_${System.currentTimeMillis()}")
+    private val thinkingConversations = mutableStateMapOf<String, Boolean>()
 
     private val pickFile = registerForActivityResult(
         ActivityResultContracts.GetContent()
@@ -134,6 +147,7 @@ class MainActivity : ComponentActivity() {
         userName = prefs.getString("user_name", null)
         userEmail = prefs.getString("user_email", null)
         userPhoto = prefs.getString("user_photo", null)
+        conversations = loadSavedConversations(this)
 
         if (prefs.getBoolean("mic_enabled", false) && tienePermisoMicrofono()) {
             AsistenteService.start(this)
@@ -146,9 +160,20 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 AsistenteService.eventosComando.collect { evento ->
+                    val targetConvId = activeConversationId
                     chat.addUser(evento.comandoUsuario)
                     chat.addAssistant(evento.respuesta)
-                    vozAsistente.hablar(evento.respuesta)
+                    guardarMensajeEnHistorial(
+                        convId = targetConvId,
+                        nuevoMensaje = SavedChatMessage(text = evento.comandoUsuario, fromUser = true)
+                    )
+                    guardarMensajeEnHistorial(
+                        convId = targetConvId,
+                        nuevoMensaje = SavedChatMessage(text = evento.respuesta, fromUser = false)
+                    )
+                    if (targetConvId == activeConversationId) {
+                        vozAsistente.hablar(evento.respuesta)
+                    }
                 }
             }
         }
@@ -159,6 +184,7 @@ class MainActivity : ComponentActivity() {
                     val isServiceRunning by AsistenteService.isRunning.collectAsState()
                     val audio by AsistenteService.estadoAudio.collectAsState()
                     val isSpeaking by vozAsistente.isSpeaking.collectAsState()
+                    val activeIsThinking = thinkingConversations[activeConversationId] == true || chat.isThinking
 
                     val view = LocalView.current
                     SideEffect {
@@ -190,7 +216,11 @@ class MainActivity : ComponentActivity() {
                         darkTheme = darkTheme,
                         onDarkThemeChange = { cambiarTema(it) },
                         messages = chat.messages,
-                        isThinking = chat.isThinking,
+                        conversations = conversations,
+                        activeConversationId = activeConversationId,
+                        onSelectConversation = { seleccionarConversacion(it) },
+                        onDeleteConversation = { eliminarConversacion(it) },
+                        isThinking = activeIsThinking,
                         isSpeaking = isSpeaking,
                         micActive = isServiceRunning,
                         micPulse = isServiceRunning && audio.hayVoz,
@@ -213,19 +243,124 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun iniciarNuevaConversacion() {
+        vozAsistente.detener()
+        pendingAttachment = null
+        chat.clear()
+        chat.updateThinking(false)
+        activeConversationId = "conv_${System.currentTimeMillis()}"
+    }
+
+    private fun seleccionarConversacion(conv: SavedConversation) {
+        vozAsistente.detener()
+        pendingAttachment = null
+        activeConversationId = conv.id
+        chat.clear()
+        conv.messages.forEach { saved ->
+            if (saved.attachment != null) {
+                chat.addAttachment(
+                    ChatAttachment(
+                        uri = saved.attachment.uri,
+                        name = saved.attachment.name,
+                        mime = saved.attachment.mime,
+                        sizeBytes = saved.attachment.sizeBytes
+                    )
+                )
+            }
+            if (saved.text.isNotBlank()) {
+                if (saved.fromUser) chat.addUser(saved.text)
+                else chat.addAssistant(saved.text)
+            }
+        }
+        chat.updateThinking(thinkingConversations[conv.id] == true)
+    }
+
+    private fun eliminarConversacion(convId: String) {
+        val filtradas = conversations.filterNot { it.id == convId }
+        conversations = filtradas
+        persistSavedConversations(this, filtradas)
+        thinkingConversations.remove(convId)
+        if (activeConversationId == convId) {
+            iniciarNuevaConversacion()
+        }
+    }
+
+    private fun guardarMensajeEnHistorial(convId: String, nuevoMensaje: SavedChatMessage) {
+        val ahora = SimpleDateFormat("dd/MM/yyyy · HH:mm", Locale.getDefault()).format(Date())
+        val lista = conversations.toMutableList()
+        val idx = lista.indexOfFirst { it.id == convId }
+
+        if (idx >= 0) {
+            val existente = lista[idx]
+            val mensajesActualizados = existente.messages + nuevoMensaje
+            val tituloActual = existente.title.ifBlank {
+                derivarTituloConversacion(mensajesActualizados)
+            }
+            lista[idx] = existente.copy(
+                title = tituloActual,
+                updatedAt = ahora,
+                messages = mensajesActualizados
+            )
+        } else {
+            val mensajesNuevos = listOf(nuevoMensaje)
+            lista.add(
+                0,
+                SavedConversation(
+                    id = convId,
+                    title = derivarTituloConversacion(mensajesNuevos),
+                    updatedAt = ahora,
+                    messages = mensajesNuevos
+                )
+            )
+        }
+
+        conversations = lista
+        persistSavedConversations(this, lista)
+    }
+
+    private fun derivarTituloConversacion(mensajes: List<SavedChatMessage>): String {
+        val base = mensajes.firstOrNull { it.fromUser && it.text.isNotBlank() }?.text
+            ?: mensajes.firstOrNull { it.attachment != null }?.attachment?.name
+            ?: "Nueva conversación"
+        return if (base.length > 34) base.take(34) + "…" else base
+    }
+
     private fun enviar(texto: String) {
         val adjuntoPendiente = pendingAttachment
         if (texto.isBlank() && adjuntoPendiente == null) return
 
+        val targetConvId = activeConversationId
+
         if (adjuntoPendiente != null) {
             chat.addAttachment(adjuntoPendiente)
             pendingAttachment = null
-        }
-        if (texto.isNotBlank()) {
-            chat.addUser(texto)
+            guardarMensajeEnHistorial(
+                convId = targetConvId,
+                nuevoMensaje = SavedChatMessage(
+                    text = "",
+                    fromUser = true,
+                    attachment = SavedChatAttachment(
+                        uri = adjuntoPendiente.uri,
+                        name = adjuntoPendiente.name,
+                        mime = adjuntoPendiente.mime,
+                        sizeBytes = adjuntoPendiente.sizeBytes
+                    )
+                )
+            )
         }
 
-        chat.updateThinking(true)
+        if (texto.isNotBlank()) {
+            chat.addUser(texto)
+            guardarMensajeEnHistorial(
+                convId = targetConvId,
+                nuevoMensaje = SavedChatMessage(text = texto, fromUser = true)
+            )
+        }
+
+        thinkingConversations[targetConvId] = true
+        if (targetConvId == activeConversationId) {
+            chat.updateThinking(true)
+        }
 
         val adjuntoObjetivo = adjuntoPendiente ?: if (PoliticaArchivos.pideResumirArchivo(texto)) {
             chat.messages.lastOrNull { it.attachment != null && !it.attachment.isImage }?.attachment
@@ -236,46 +371,71 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             AsistenteService.updateAssistantState(AssistantState.THINKING)
             try {
-                val resultado = withContext(Dispatchers.IO) {
-                    when {
-                        adjuntoObjetivo != null && !adjuntoObjetivo.isImage -> {
-                            val lectura = PoliticaArchivos.leer(
-                                contentResolver,
-                                Uri.parse(adjuntoObjetivo.uri),
-                                adjuntoObjetivo.name,
-                                adjuntoObjetivo.mime,
-                                adjuntoObjetivo.sizeBytes
-                            )
-                            procesador.resumirArchivo(
-                                nombre = adjuntoObjetivo.name,
-                                lectura = lectura,
-                                instruccionUsuario = texto.takeIf { it.isNotBlank() }
-                            )
-                        }
-                        adjuntoObjetivo != null && adjuntoObjetivo.isImage -> {
-                            val consultaImagen = if (texto.isBlank()) {
-                                "El usuario adjuntó la imagen «${adjuntoObjetivo.name}». Indícale brevemente cómo puedes ayudarle con ella."
-                            } else {
-                                "$texto (imagen adjunta: ${adjuntoObjetivo.name})"
+                val resultado = withTimeoutOrNull(30_000L) {
+                    withContext(Dispatchers.IO) {
+                        when {
+                            adjuntoObjetivo != null && !adjuntoObjetivo.isImage -> {
+                                val lectura = PoliticaArchivos.leer(
+                                    contentResolver,
+                                    Uri.parse(adjuntoObjetivo.uri),
+                                    adjuntoObjetivo.name,
+                                    adjuntoObjetivo.mime,
+                                    adjuntoObjetivo.sizeBytes
+                                )
+                                procesador.resumirArchivo(
+                                    nombre = adjuntoObjetivo.name,
+                                    lectura = lectura,
+                                    instruccionUsuario = texto.takeIf { it.isNotBlank() }
+                                )
                             }
-                            procesador.procesar(consultaImagen)
+                            adjuntoObjetivo != null && adjuntoObjetivo.isImage -> {
+                                val consultaImagen = if (texto.isBlank()) {
+                                    "El usuario adjuntó la imagen «${adjuntoObjetivo.name}». Indícale brevemente cómo puedes ayudarle con ella."
+                                } else {
+                                    "$texto (imagen adjunta: ${adjuntoObjetivo.name})"
+                                }
+                                procesador.procesar(consultaImagen)
+                            }
+                            else -> procesador.procesar(texto)
                         }
-                        else -> procesador.procesar(texto)
                     }
-                }
+                } ?: ResultadoComando(
+                    exito = false,
+                    mensaje = "La consulta tardó demasiado en responder. Inténtalo de nuevo."
+                )
+
                 val respuestaFinal = resultado.mensaje.ifBlank { "Listo." }
-                chat.addAssistant(respuestaFinal)
-                if (resultado.exito) {
-                    vozAsistente.hablar(respuestaFinal)
+
+                guardarMensajeEnHistorial(
+                    convId = targetConvId,
+                    nuevoMensaje = SavedChatMessage(text = respuestaFinal, fromUser = false)
+                )
+
+                if (targetConvId == activeConversationId) {
+                    chat.addAssistant(respuestaFinal)
+                    if (resultado.exito) {
+                        vozAsistente.hablar(respuestaFinal)
+                    }
                 }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 val errorMsg = "No pude completar eso: ${e.message ?: "error desconocido"}"
-                chat.addAssistant(errorMsg)
+                guardarMensajeEnHistorial(
+                    convId = targetConvId,
+                    nuevoMensaje = SavedChatMessage(text = errorMsg, fromUser = false)
+                )
+                if (targetConvId == activeConversationId) {
+                    chat.addAssistant(errorMsg)
+                }
             } finally {
-                chat.updateThinking(false)
-                AsistenteService.updateAssistantState(AssistantState.IDLE)
+                thinkingConversations.remove(targetConvId)
+                if (targetConvId == activeConversationId) {
+                    chat.updateThinking(false)
+                }
+                if (thinkingConversations.isEmpty()) {
+                    AsistenteService.updateAssistantState(AssistantState.IDLE)
+                }
             }
         }
     }
@@ -285,16 +445,39 @@ class MainActivity : ComponentActivity() {
             val adjunto = withContext(Dispatchers.IO) {
                 val item = leerAdjunto(uri)
                 val tipo = if (esFoto || item.isImage) "photo" else "file"
+                val uriPersistente = copiarArchivoLocalmente(uri, item.name)
                 saveUriToIrisMedia(applicationContext, uri, tipo)
-                item
+                if (uriPersistente != null) {
+                    item.copy(uri = uriPersistente)
+                } else {
+                    item
+                }
             }
             pendingAttachment = adjunto
         }
     }
 
+    private fun copiarArchivoLocalmente(uri: Uri, nombreOriginal: String): String? {
+        return try {
+            val dir = File(filesDir, "iris_attachments").apply { mkdirs() }
+            val limpio = nombreOriginal.replace(Regex("""[^\w.\-]"""), "_")
+            val destino = File(dir, "${System.currentTimeMillis()}_$limpio")
+            contentResolver.openInputStream(uri)?.use { input ->
+                destino.outputStream().use { output -> input.copyTo(output) }
+            }
+            if (destino.exists() && destino.length() > 0L) {
+                Uri.fromFile(destino).toString()
+            } else {
+                null
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     private fun guardarCapturaCamara(bitmap: Bitmap): ChatAttachment? {
         return try {
-            val dir = File(cacheDir, "camara").apply { mkdirs() }
+            val dir = File(filesDir, "iris_attachments").apply { mkdirs() }
             val nombre = "foto_${System.currentTimeMillis()}.png"
             val archivo = File(dir, nombre)
             FileOutputStream(archivo).use { out ->
@@ -481,7 +664,7 @@ class MainActivity : ComponentActivity() {
 
     private fun manejarAccion(destination: String) {
         when (destination) {
-            "new_chat" -> chat.clear()
+            "new_chat", "clear_messages" -> iniciarNuevaConversacion()
             "permissions" -> abrirAjustesDeLaApp()
             "support" -> enviarCorreoSoporte()
             "sign_out" -> cerrarSesion()
