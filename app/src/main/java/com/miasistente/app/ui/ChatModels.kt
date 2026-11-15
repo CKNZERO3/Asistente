@@ -19,8 +19,10 @@ data class ChatMessage(
     val id: Long,
     val text: String,
     val fromUser: Boolean,
-    val attachment: ChatAttachment? = null
-)
+    val attachments: List<ChatAttachment> = emptyList()
+) {
+    val attachment: ChatAttachment? get() = attachments.firstOrNull()
+}
 
 class ChatViewModel : ViewModel() {
     val messages = mutableStateListOf<ChatMessage>()
@@ -30,16 +32,23 @@ class ChatViewModel : ViewModel() {
 
     private var nextId = 0L
 
-    fun addUser(text: String) {
-        messages.add(ChatMessage(nextId++, text, fromUser = true))
+    fun addUser(text: String, attachments: List<ChatAttachment> = emptyList()) {
+        messages.add(
+            ChatMessage(
+                id = nextId++,
+                text = text,
+                fromUser = true,
+                attachments = attachments
+            )
+        )
     }
 
     fun addAttachment(attachment: ChatAttachment) {
-        messages.add(ChatMessage(nextId++, "", fromUser = true, attachment = attachment))
+        addUser(text = "", attachments = listOf(attachment))
     }
 
     fun addAssistant(text: String) {
-        messages.add(ChatMessage(nextId++, text, fromUser = false))
+        messages.add(ChatMessage(id = nextId++, text = text, fromUser = false))
     }
 
     fun updateThinking(value: Boolean) {
