@@ -5,12 +5,18 @@ import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.Locale
 
 class VozAsistente(context: Context) {
     @Volatile private var listo = false
     private var tts: TextToSpeech? = null
+
+    private val _isSpeaking = MutableStateFlow(false)
+    val isSpeaking: StateFlow<Boolean> = _isSpeaking.asStateFlow()
 
     init {
         tts = TextToSpeech(context.applicationContext) { estado ->
@@ -42,18 +48,43 @@ class VozAsistente(context: Context) {
         val fin = CompletableDeferred<Unit>()
 
         motor.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-            override fun onStart(utteranceId: String?) {}
+            override fun onStart(utteranceId: String?) {
+                if (utteranceId == id) _isSpeaking.value = true
+            }
             override fun onDone(utteranceId: String?) {
-                if (utteranceId == id) fin.complete(Unit)
+                if (utteranceId == id) {
+                    _isSpeaking.value = false
+                    fin.complete(Unit)
+                }
             }
             @Suppress("OVERRIDE_DEPRECATION")
             override fun onError(utteranceId: String?) {
-                if (utteranceId == id) fin.complete(Unit)
+                if (utteranceId == id) {
+                    _isSpeaking.value = false
+                    fin.complete(Unit)
+                }
             }
         })
 
-        motor.speak(texto, TextToSpeech.QUEUE_FLUSH, null, id)
-        withTimeoutOrNull(25_000L) { fin.await() }
+        _isSpeaking.value = true
+        val resultado = motor.speak(texto, TextToSpeech.QUEUE_FLUSH, null, id)
+        if (resultado == TextToSpeech.ERROR) {
+            _isSpeaking.value = false
+            return
+        }
+        try {
+            withTimeoutOrNull(25_000L) { fin.await() }
+        } finally {
+            _isSpeaking.value = false
+        }
+    }
+
+    fun detener() {
+        try {
+            tts?.stop()
+        } catch (_: Exception) {
+        }
+        _isSpeaking.value = false
     }
 
     fun cerrar() {
@@ -65,5 +96,6 @@ class VozAsistente(context: Context) {
         }
         tts = null
         listo = false
+        _isSpeaking.value = false
     }
 }
