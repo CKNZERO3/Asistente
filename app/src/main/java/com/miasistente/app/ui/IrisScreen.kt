@@ -86,16 +86,21 @@ import androidx.core.graphics.PathParser
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
-private data class SavedChatMessage(
-    val text: String,
-    val fromUser: Boolean
+data class SavedChatAttachment(
+    val uri: String,
+    val name: String,
+    val mime: String? = null,
+    val sizeBytes: Long? = null
 )
 
-private data class SavedConversation(
+data class SavedChatMessage(
+    val text: String,
+    val fromUser: Boolean,
+    val attachment: SavedChatAttachment? = null
+)
+
+data class SavedConversation(
     val id: String,
     val title: String,
     val updatedAt: String,
@@ -114,6 +119,10 @@ fun IrisScreen(
     onDarkThemeChange: (Boolean) -> Unit = {},
     onAmoledChange: (Boolean) -> Unit = {},
     messages: MutableList<ChatMessage>,
+    conversations: List<SavedConversation> = emptyList(),
+    activeConversationId: String = "",
+    onSelectConversation: (SavedConversation) -> Unit = {},
+    onDeleteConversation: (String) -> Unit = {},
     isThinking: Boolean = false,
     isSpeaking: Boolean = false,
     micActive: Boolean = false,
@@ -153,37 +162,6 @@ fun IrisScreen(
     var liveTranscript by remember { mutableStateOf<String?>(null) }
     var speechRecognizer by remember { mutableStateOf<SpeechRecognizer?>(null) }
 
-    var conversations by remember { mutableStateOf(loadSavedConversations(context)) }
-    var activeConversationId by rememberSaveable { mutableStateOf("conv_${System.currentTimeMillis()}") }
-    var archivedMessages by remember { mutableStateOf<List<SavedChatMessage>?>(null) }
-
-    LaunchedEffect(messages.size) {
-        if (messages.isNotEmpty() && archivedMessages == null) {
-            val mapped = messages.map { SavedChatMessage(text = it.text, fromUser = it.fromUser) }
-            val firstUserText = mapped.firstOrNull { it.fromUser && it.text.isNotBlank() }?.text
-                ?: messages.firstOrNull { it.attachment != null }?.attachment?.name
-                ?: "Nueva conversación"
-            val title = if (firstUserText.length > 34) firstUserText.take(34) + "…" else firstUserText
-            val now = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
-
-            val updated = conversations.toMutableList()
-            val idx = updated.indexOfFirst { it.id == activeConversationId }
-            val entry = SavedConversation(
-                id = activeConversationId,
-                title = title,
-                updatedAt = now,
-                messages = mapped
-            )
-            if (idx >= 0) {
-                updated[idx] = entry
-            } else {
-                updated.add(0, entry)
-            }
-            conversations = updated
-            persistSavedConversations(context, updated)
-        }
-    }
-
     LaunchedEffect(isSpeaking, isThinking, lastPromptWasVoice, messages.size) {
         val ultimoMensaje = messages.lastOrNull()
         val esError = ultimoMensaje != null && !ultimoMensaje.fromUser && esMensajeDeError(ultimoMensaje.text)
@@ -201,7 +179,7 @@ fun IrisScreen(
         try {
             speechRecognizer?.stopListening()
             speechRecognizer?.destroy()
-        } catch (e: Exception) {}
+        } catch (_: Exception) {}
         speechRecognizer = null
         liveListening = false
         liveTranscript = null
@@ -214,7 +192,6 @@ fun IrisScreen(
     fun submitUserPrompt(rawText: String, fromVoice: Boolean) {
         val clean = rawText.trim()
         if (clean.isEmpty() && pendingAttachment == null) return
-        archivedMessages = null
         lastPromptWasVoice = fromVoice
         onAction(if (fromVoice) "tts_voice_mode" else "tts_text_mode")
         if (!fromVoice) {
@@ -301,14 +278,7 @@ fun IrisScreen(
             }
             "new_chat" -> {
                 focusManager.clearFocus()
-                val filtered = conversations.filter { it.messages.isNotEmpty() }
-                conversations = filtered
-                persistSavedConversations(context, filtered)
-
-                archivedMessages = null
-                messages.clear()
-                activeConversationId = "conv_${System.currentTimeMillis()}"
-                onAction("clear_messages")
+                onAction("new_chat")
             }
             "about", "privacy", "account" -> dialog = action
             else -> onAction(action)
@@ -363,15 +333,11 @@ fun IrisScreen(
                                 onSelectConversation = { conv ->
                                     scope.launch {
                                         drawerState.close()
-                                        activeConversationId = conv.id
-                                        archivedMessages = conv.messages
+                                        onSelectConversation(conv)
                                     }
                                 },
                                 onDeleteConversation = { convId ->
-                                    val filtered = conversations.filterNot { it.id == convId }
-                                    conversations = filtered
-                                    persistSavedConversations(context, filtered)
-                                    if (activeConversationId == convId) handle("new_chat")
+                                    onDeleteConversation(convId)
                                 },
                                 onAction = ::navigate
                             )
@@ -384,7 +350,6 @@ fun IrisScreen(
                     IrisMain(
                         userName = userName,
                         messages = messages,
-                        archivedMessages = archivedMessages,
                         isThinking = isThinking,
                         showStopSpeaking = showStopVoicePill,
                         micActive = effectiveMicActive,
@@ -517,6 +482,7 @@ private fun esMensajeDeError(texto: String): Boolean {
         t.startsWith("Mi servicio de inteligencia") ||
         t.startsWith("Tuve un problema") ||
         t.startsWith("No tengo autorización") ||
+        t.startsWith("La consulta tardó") ||
         t.startsWith("Error:")
 }
 
@@ -535,7 +501,6 @@ private fun InfoDialog(title: String, text: String, onDismiss: () -> Unit) {
 private fun IrisMain(
     userName: String?,
     messages: List<ChatMessage>,
-    archivedMessages: List<SavedChatMessage>?,
     isThinking: Boolean,
     showStopSpeaking: Boolean,
     micActive: Boolean,
@@ -554,7 +519,7 @@ private fun IrisMain(
     onSend: () -> Unit
 ) {
     val p = LocalIrisPalette.current
-    val hasContent = archivedMessages != null || messages.isNotEmpty()
+    val hasContent = messages.isNotEmpty()
 
     val infiniteTransition = rememberInfiniteTransition(label = "bg_anim")
     val c1 by infiniteTransition.animateColor(
@@ -601,8 +566,6 @@ private fun IrisMain(
         ) {
             if (!hasContent) {
                 IrisWelcome(userName, !darkTheme)
-            } else if (archivedMessages != null) {
-                SavedChatList(archivedMessages)
             } else {
                 IrisChatList(messages, isThinking)
             }
@@ -754,11 +717,14 @@ private fun IrisChatList(messages: List<ChatMessage>, isThinking: Boolean) {
     val total = messages.size + if (isThinking) 1 else 0
 
     LaunchedEffect(total) {
-        if (total > 0) listState.animateScrollToItem(total - 1)
+        if (total > 0) {
+            listState.scrollToItem(total - 1)
+        }
     }
 
     LazyColumn(
         state = listState,
+        userScrollEnabled = true,
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -770,26 +736,6 @@ private fun IrisChatList(messages: List<ChatMessage>, isThinking: Boolean) {
             item(key = "thinking") {
                 ChatBubble("Iris está pensando…", fromUser = false, attachment = null, muted = true)
             }
-        }
-    }
-}
-
-@Composable
-private fun SavedChatList(messages: List<SavedChatMessage>) {
-    val listState = rememberLazyListState()
-    LaunchedEffect(messages.size) {
-        if (messages.isNotEmpty()) listState.scrollToItem(messages.lastIndex)
-    }
-
-    LazyColumn(
-        state = listState,
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        items(messages.size) { idx ->
-            val item = messages[idx]
-            ChatBubble(item.text, item.fromUser, attachment = null)
         }
     }
 }
@@ -1034,12 +980,35 @@ private fun IrisDrawer(
                             .clip(RoundedCornerShape(12.dp))
                             .background(if (isCurrent) MaterialTheme.colorScheme.surface else Color.Transparent)
                             .clickable { onSelectConversation(conv) }
-                            .padding(horizontal = 10.dp, vertical = 10.dp),
+                            .padding(horizontal = 10.dp, vertical = 9.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(Icons.Outlined.ChatBubbleOutline, null, tint = if (isCurrent) p.accent else p.muted, modifier = Modifier.size(18.dp))
+                        Icon(
+                            Icons.Outlined.ChatBubbleOutline,
+                            null,
+                            tint = if (isCurrent) p.accent else p.muted,
+                            modifier = Modifier.size(18.dp)
+                        )
                         Spacer(Modifier.width(10.dp))
-                        Text(text = conv.title, color = p.text, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = conv.title,
+                                color = p.text,
+                                fontSize = 13.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            if (conv.updatedAt.isNotBlank()) {
+                                Spacer(Modifier.height(2.dp))
+                                Text(
+                                    text = conv.updatedAt,
+                                    color = p.muted.copy(alpha = 0.55f),
+                                    fontSize = 10.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
                         IconButton(onClick = { onDeleteConversation(conv.id) }, modifier = Modifier.size(26.dp)) {
                             Icon(Icons.Outlined.Delete, "Borrar", tint = p.muted, modifier = Modifier.size(16.dp))
                         }
@@ -1134,7 +1103,7 @@ private fun IrisGalleryScreen(onBack: () -> Unit) {
     }
 }
 
-private fun loadSavedConversations(context: Context): List<SavedConversation> {
+fun loadSavedConversations(context: Context): List<SavedConversation> {
     val prefs = context.getSharedPreferences("iris_history", Context.MODE_PRIVATE)
     val raw = prefs.getString("conversations", null) ?: return emptyList()
     return try {
@@ -1144,21 +1113,75 @@ private fun loadSavedConversations(context: Context): List<SavedConversation> {
             val msgsJson = obj.optJSONArray("messages") ?: JSONArray()
             val msgs = List(msgsJson.length()) { j ->
                 val m = msgsJson.getJSONObject(j)
-                SavedChatMessage(m.optString("text"), m.optBoolean("fromUser"))
+                val attObj = m.optJSONObject("attachment")
+                val att = if (attObj != null) {
+                    SavedChatAttachment(
+                        uri = attObj.optString("uri"),
+                        name = attObj.optString("name", "Archivo"),
+                        mime = attObj.optString("mime").takeIf { it.isNotBlank() && it != "null" },
+                        sizeBytes = if (attObj.has("sizeBytes") && !attObj.isNull("sizeBytes")) {
+                            attObj.getLong("sizeBytes")
+                        } else {
+                            null
+                        }
+                    )
+                } else {
+                    null
+                }
+                SavedChatMessage(
+                    text = m.optString("text"),
+                    fromUser = m.optBoolean("fromUser"),
+                    attachment = att
+                )
             }
-            SavedConversation(obj.getString("id"), obj.getString("title"), obj.optString("updatedAt", ""), msgs)
+            SavedConversation(
+                id = obj.getString("id"),
+                title = obj.getString("title"),
+                updatedAt = obj.optString("updatedAt", ""),
+                messages = msgs
+            )
         }
-    } catch (e: Exception) { emptyList() }
+    } catch (_: Exception) {
+        emptyList()
+    }
 }
 
-private fun persistSavedConversations(context: Context, list: List<SavedConversation>) {
+fun persistSavedConversations(context: Context, list: List<SavedConversation>) {
     val array = JSONArray()
-    list.take(25).forEach { conv ->
+    list.take(30).forEach { conv ->
         val msgsJson = JSONArray()
-        conv.messages.forEach { msg -> msgsJson.put(JSONObject().apply { put("text", msg.text); put("fromUser", msg.fromUser) }) }
-        array.put(JSONObject().apply { put("id", conv.id); put("title", conv.title); put("updatedAt", conv.updatedAt); put("messages", msgsJson) })
+        conv.messages.forEach { msg ->
+            msgsJson.put(
+                JSONObject().apply {
+                    put("text", msg.text)
+                    put("fromUser", msg.fromUser)
+                    if (msg.attachment != null) {
+                        put(
+                            "attachment",
+                            JSONObject().apply {
+                                put("uri", msg.attachment.uri)
+                                put("name", msg.attachment.name)
+                                put("mime", msg.attachment.mime ?: JSONObject.NULL)
+                                put("sizeBytes", msg.attachment.sizeBytes ?: JSONObject.NULL)
+                            }
+                        )
+                    }
+                }
+            )
+        }
+        array.put(
+            JSONObject().apply {
+                put("id", conv.id)
+                put("title", conv.title)
+                put("updatedAt", conv.updatedAt)
+                put("messages", msgsJson)
+            }
+        )
     }
-    context.getSharedPreferences("iris_history", Context.MODE_PRIVATE).edit().putString("conversations", array.toString()).apply()
+    context.getSharedPreferences("iris_history", Context.MODE_PRIVATE)
+        .edit()
+        .putString("conversations", array.toString())
+        .apply()
 }
 
 @Composable
