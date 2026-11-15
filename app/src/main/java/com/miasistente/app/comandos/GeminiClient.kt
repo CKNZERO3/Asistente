@@ -128,10 +128,23 @@ class GeminiClient(
                 listOf(
                     IrisModelSelector.MODELO_AVANZADO,
                     IrisModelSelector.MODELO_AVANZADO_ALTERNO,
-                    IrisModelSelector.MODELO_GENERAL
+                    IrisModelSelector.MODELO_GENERAL,
+                    IrisModelSelector.MODELO_LIGERO_ALTERNO
+                )
+            IrisModelSelector.MODELO_AVANZADO_ALTERNO ->
+                listOf(
+                    IrisModelSelector.MODELO_AVANZADO_ALTERNO,
+                    IrisModelSelector.MODELO_AVANZADO,
+                    IrisModelSelector.MODELO_GENERAL,
+                    IrisModelSelector.MODELO_LIGERO_ALTERNO
                 )
             else ->
-                listOf(IrisModelSelector.MODELO_GENERAL)
+                listOf(
+                    IrisModelSelector.MODELO_GENERAL,
+                    IrisModelSelector.MODELO_LIGERO_ALTERNO,
+                    IrisModelSelector.MODELO_AVANZADO,
+                    IrisModelSelector.MODELO_AVANZADO_ALTERNO
+                )
         }.distinct()
 
     /**
