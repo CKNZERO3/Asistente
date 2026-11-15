@@ -39,11 +39,8 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.safeDrawing
-import androidx.compose.foundation.layout.systemBars
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -97,8 +94,10 @@ data class SavedChatAttachment(
 data class SavedChatMessage(
     val text: String,
     val fromUser: Boolean,
-    val attachment: SavedChatAttachment? = null
-)
+    val attachments: List<SavedChatAttachment> = emptyList()
+) {
+    val attachment: SavedChatAttachment? get() = attachments.firstOrNull()
+}
 
 data class SavedConversation(
     val id: String,
@@ -125,17 +124,19 @@ fun IrisScreen(
     onDeleteConversation: (String) -> Unit = {},
     isThinking: Boolean = false,
     isSpeaking: Boolean = false,
+    speakingMessageText: String? = null,
     micActive: Boolean = false,
     micPulse: Boolean = false,
     voiceStatus: String? = null,
     permissionPrompt: PermissionPrompt? = null,
-    pendingAttachment: ChatAttachment? = null,
-    onClearAttachment: () -> Unit = {},
+    pendingAttachments: List<ChatAttachment> = emptyList(),
+    onRemoveAttachment: (Int) -> Unit = {},
     onPermissionConfirm: () -> Unit = {},
     onPermissionDismiss: () -> Unit = {},
     onAvatarChanged: (Boolean) -> Unit = {},
     onSend: (String) -> Unit = {},
     onVoice: () -> Unit = {},
+    onSpeakMessage: (String) -> Unit = {},
     onStopSpeaking: () -> Unit = {},
     onAttach: () -> Unit = {},
     onPhotoSelected: (Uri) -> Unit = {},
@@ -191,7 +192,7 @@ fun IrisScreen(
 
     fun submitUserPrompt(rawText: String, fromVoice: Boolean) {
         val clean = rawText.trim()
-        if (clean.isEmpty() && pendingAttachment == null) return
+        if (clean.isEmpty() && pendingAttachments.isEmpty()) return
         lastPromptWasVoice = fromVoice
         onAction(if (fromVoice) "tts_voice_mode" else "tts_text_mode")
         if (!fromVoice) {
@@ -351,13 +352,15 @@ fun IrisScreen(
                         userName = userName,
                         messages = messages,
                         isThinking = isThinking,
+                        isSpeaking = isSpeaking,
+                        speakingMessageText = speakingMessageText,
                         showStopSpeaking = showStopVoicePill,
                         micActive = effectiveMicActive,
                         micPulse = liveListening || micPulse,
                         voiceStatus = effectiveStatus,
                         message = message,
-                        pendingAttachment = pendingAttachment,
-                        onClearAttachment = onClearAttachment,
+                        pendingAttachments = pendingAttachments,
+                        onRemoveAttachment = onRemoveAttachment,
                         darkTheme = darkTheme,
                         amoledMode = amoledMode,
                         onMessageChange = { message = it },
@@ -370,6 +373,7 @@ fun IrisScreen(
                             showAttachMenu = true
                         },
                         onVoice = ::handleMicTap,
+                        onSpeakMessage = onSpeakMessage,
                         onStopSpeaking = {
                             showStopVoicePill = false
                             lastPromptWasVoice = false
@@ -502,19 +506,22 @@ private fun IrisMain(
     userName: String?,
     messages: List<ChatMessage>,
     isThinking: Boolean,
+    isSpeaking: Boolean,
+    speakingMessageText: String?,
     showStopSpeaking: Boolean,
     micActive: Boolean,
     micPulse: Boolean,
     voiceStatus: String?,
     message: String,
-    pendingAttachment: ChatAttachment?,
-    onClearAttachment: () -> Unit,
+    pendingAttachments: List<ChatAttachment>,
+    onRemoveAttachment: (Int) -> Unit,
     darkTheme: Boolean,
     amoledMode: Boolean,
     onMessageChange: (String) -> Unit,
     onOpenDrawer: () -> Unit,
     onAttach: () -> Unit,
     onVoice: () -> Unit,
+    onSpeakMessage: (String) -> Unit,
     onStopSpeaking: () -> Unit,
     onSend: () -> Unit
 ) {
@@ -545,14 +552,16 @@ private fun IrisMain(
         modifier = Modifier
             .fillMaxSize()
             .then(bgModifier)
-            .padding(horizontal = 20.dp, vertical = 12.dp)
+            .statusBarsPadding()
+            .navigationBarsPadding()
+            .imePadding()
+            .padding(horizontal = 20.dp, vertical = 10.dp)
     ) {
         Text(
             text = "Iris",
             color = p.text,
             fontSize = 28.sp,
             modifier = Modifier
-                .padding(top = 12.dp)
                 .clip(RoundedCornerShape(12.dp))
                 .clickable(role = Role.Button, onClickLabel = "Abrir menú", onClick = onOpenDrawer)
                 .padding(horizontal = 8.dp, vertical = 6.dp)
@@ -567,7 +576,14 @@ private fun IrisMain(
             if (!hasContent) {
                 IrisWelcome(userName, !darkTheme)
             } else {
-                IrisChatList(messages, isThinking)
+                IrisChatList(
+                    messages = messages,
+                    isThinking = isThinking,
+                    isSpeaking = isSpeaking,
+                    speakingMessageText = speakingMessageText,
+                    onSpeakMessage = onSpeakMessage,
+                    onStopSpeaking = onStopSpeaking
+                )
             }
         }
 
@@ -611,17 +627,17 @@ private fun IrisMain(
             )
         }
 
-        if (pendingAttachment != null) {
-            PendingAttachmentChip(
-                attachment = pendingAttachment,
-                onRemove = onClearAttachment,
+        if (pendingAttachments.isNotEmpty()) {
+            PendingAttachmentsRow(
+                attachments = pendingAttachments,
+                onRemove = onRemoveAttachment,
                 modifier = Modifier.padding(bottom = 8.dp)
             )
         }
 
         IrisComposer(
             value = message,
-            hasAttachment = pendingAttachment != null,
+            hasAttachment = pendingAttachments.isNotEmpty(),
             onValueChange = onMessageChange,
             micActive = micActive,
             micPulse = micPulse,
@@ -630,51 +646,105 @@ private fun IrisMain(
             onSend = onSend
         )
 
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(6.dp))
     }
 }
 
 @Composable
-private fun PendingAttachmentChip(
-    attachment: ChatAttachment,
-    onRemove: () -> Unit,
+private fun PendingAttachmentsRow(
+    attachments: List<ChatAttachment>,
+    onRemove: (Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val p = LocalIrisPalette.current
-    val shape = RoundedCornerShape(16.dp)
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
+    Column(modifier = modifier.fillMaxWidth()) {
+        Text(
+            text = "Adjuntos (${attachments.size}/5)",
+            color = p.muted,
+            fontSize = 11.sp,
+            modifier = Modifier.padding(start = 4.dp, bottom = 4.dp)
+        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            attachments.forEachIndexed { index, attachment ->
+                PendingAttachmentThumbnail(
+                    attachment = attachment,
+                    onRemove = { onRemove(index) }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun PendingAttachmentThumbnail(
+    attachment: ChatAttachment,
+    onRemove: () -> Unit
+) {
+    val p = LocalIrisPalette.current
+    val shape = RoundedCornerShape(14.dp)
+    val thumbResult = if (attachment.isImage) rememberUriBitmap(attachment.uri, 180) else null
+
+    Box(
+        modifier = Modifier
+            .size(width = 96.dp, height = 74.dp)
             .clip(shape)
             .background(MaterialTheme.colorScheme.surface)
             .border(1.dp, p.accent.copy(alpha = 0.55f), shape)
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(
-            imageVector = if (attachment.isImage) Icons.Outlined.Image else Icons.Outlined.Description,
-            contentDescription = null,
-            tint = p.accent,
-            modifier = Modifier.size(20.dp)
-        )
-        Spacer(Modifier.width(10.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = attachment.name,
-                color = p.text,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
+        val btm = thumbResult?.bitmap
+        if (btm != null) {
+            Image(
+                bitmap = btm,
+                contentDescription = attachment.name,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
             )
-            Text(
-                text = if (attachment.isImage) "Imagen adjunta" else "Archivo listo para analizar o resumir",
-                color = p.muted,
-                fontSize = 11.sp
-            )
+        } else {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Icon(
+                    imageVector = if (attachment.isImage) Icons.Outlined.Image else Icons.Outlined.Description,
+                    contentDescription = null,
+                    tint = p.accent,
+                    modifier = Modifier.size(22.dp)
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = attachment.name,
+                    color = p.text,
+                    fontSize = 10.sp,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
         }
-        IconButton(onClick = onRemove, modifier = Modifier.size(28.dp)) {
-            Icon(Icons.Default.Close, contentDescription = "Quitar adjunto", tint = p.muted, modifier = Modifier.size(16.dp))
+
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(4.dp)
+                .size(20.dp)
+                .clip(CircleShape)
+                .background(Color.Black.copy(alpha = 0.68f))
+                .clickable(role = Role.Button, onClickLabel = "Quitar adjunto", onClick = onRemove),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Default.Close,
+                contentDescription = "Quitar adjunto",
+                tint = Color.White,
+                modifier = Modifier.size(12.dp)
+            )
         }
     }
 }
@@ -712,11 +782,18 @@ private fun IrisWelcome(userName: String?, isLightMode: Boolean) {
 }
 
 @Composable
-private fun IrisChatList(messages: List<ChatMessage>, isThinking: Boolean) {
+private fun IrisChatList(
+    messages: List<ChatMessage>,
+    isThinking: Boolean,
+    isSpeaking: Boolean,
+    speakingMessageText: String?,
+    onSpeakMessage: (String) -> Unit,
+    onStopSpeaking: () -> Unit
+) {
     val listState = rememberLazyListState()
     val total = messages.size + if (isThinking) 1 else 0
 
-    LaunchedEffect(total) {
+    LaunchedEffect(total, messages.lastOrNull()?.text) {
         if (total > 0) {
             listState.scrollToItem(total - 1)
         }
@@ -730,11 +807,27 @@ private fun IrisChatList(messages: List<ChatMessage>, isThinking: Boolean) {
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         items(messages, key = { it.id }) { message ->
-            ChatBubble(message.text, message.fromUser, message.attachment)
+            val isSpeakingThis = !message.fromUser &&
+                isSpeaking &&
+                speakingMessageText == message.text
+            ChatBubble(
+                text = message.text,
+                fromUser = message.fromUser,
+                attachments = message.attachments,
+                isSpeakingThis = isSpeakingThis,
+                onSpeakClick = {
+                    if (isSpeakingThis) onStopSpeaking() else onSpeakMessage(message.text)
+                }
+            )
         }
         if (isThinking) {
             item(key = "thinking") {
-                ChatBubble("Iris está pensando…", fromUser = false, attachment = null, muted = true)
+                ChatBubble(
+                    text = "Iris está pensando…",
+                    fromUser = false,
+                    attachments = emptyList(),
+                    muted = true
+                )
             }
         }
     }
@@ -744,8 +837,10 @@ private fun IrisChatList(messages: List<ChatMessage>, isThinking: Boolean) {
 private fun ChatBubble(
     text: String,
     fromUser: Boolean,
-    attachment: ChatAttachment?,
-    muted: Boolean = false
+    attachments: List<ChatAttachment>,
+    muted: Boolean = false,
+    isSpeakingThis: Boolean = false,
+    onSpeakClick: () -> Unit = {}
 ) {
     val p = LocalIrisPalette.current
     val shape = RoundedCornerShape(
@@ -754,7 +849,7 @@ private fun ChatBubble(
         bottomStart = if (fromUser) 20.dp else 6.dp,
         bottomEnd = if (fromUser) 6.dp else 20.dp
     )
-    val hasAttachment = attachment != null
+    val hasAttachments = attachments.isNotEmpty()
     val textColor = when {
         fromUser -> Color.White
         muted -> p.muted
@@ -771,19 +866,51 @@ private fun ChatBubble(
                 .background(if (fromUser) IrisAccentGradient else SolidColor(MaterialTheme.colorScheme.surface), shape)
                 .then(if (!fromUser && !p.isDark) Modifier.border(1.dp, p.outline, shape) else Modifier)
                 .padding(
-                    horizontal = if (hasAttachment) 6.dp else 14.dp,
-                    vertical = if (hasAttachment) 6.dp else 10.dp
+                    horizontal = if (hasAttachments) 8.dp else 14.dp,
+                    vertical = if (hasAttachments) 8.dp else 10.dp
                 )
         ) {
-            Column {
-                if (attachment != null) AttachmentPreview(attachment, onAccent = fromUser)
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (attachments.size == 1) {
+                    AttachmentPreview(attachments.first(), onAccent = fromUser)
+                } else if (attachments.size > 1) {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        attachments.forEach { item ->
+                            AttachmentPreview(item, onAccent = fromUser)
+                        }
+                    }
+                }
+
                 if (text.isNotBlank()) {
                     Text(
                         text = text,
                         color = textColor,
                         fontSize = 14.sp,
-                        modifier = if (hasAttachment) Modifier.padding(horizontal = 8.dp, vertical = 6.dp) else Modifier
+                        modifier = if (hasAttachments) Modifier.padding(horizontal = 6.dp, vertical = 2.dp) else Modifier
                     )
+                }
+
+                if (!fromUser && !muted && text.isNotBlank()) {
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .clickable(role = Role.Button, onClick = onSpeakClick)
+                            .padding(horizontal = 4.dp, vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = if (isSpeakingThis) Icons.Default.StopCircle else Icons.Outlined.VolumeUp,
+                            contentDescription = if (isSpeakingThis) "Detener lectura" else "Leer en voz alta",
+                            tint = if (isSpeakingThis) p.accent else p.muted,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            text = if (isSpeakingThis) "Detener" else "Escuchar",
+                            color = if (isSpeakingThis) p.accent else p.muted,
+                            fontSize = 11.sp
+                        )
+                    }
                 }
             }
         }
@@ -1103,6 +1230,18 @@ private fun IrisGalleryScreen(onBack: () -> Unit) {
     }
 }
 
+private fun parseSavedAttachment(obj: JSONObject): SavedChatAttachment =
+    SavedChatAttachment(
+        uri = obj.optString("uri"),
+        name = obj.optString("name", "Archivo"),
+        mime = obj.optString("mime").takeIf { it.isNotBlank() && it != "null" },
+        sizeBytes = if (obj.has("sizeBytes") && !obj.isNull("sizeBytes")) {
+            obj.getLong("sizeBytes")
+        } else {
+            null
+        }
+    )
+
 fun loadSavedConversations(context: Context): List<SavedConversation> {
     val prefs = context.getSharedPreferences("iris_history", Context.MODE_PRIVATE)
     val raw = prefs.getString("conversations", null) ?: return emptyList()
@@ -1113,25 +1252,20 @@ fun loadSavedConversations(context: Context): List<SavedConversation> {
             val msgsJson = obj.optJSONArray("messages") ?: JSONArray()
             val msgs = List(msgsJson.length()) { j ->
                 val m = msgsJson.getJSONObject(j)
-                val attObj = m.optJSONObject("attachment")
-                val att = if (attObj != null) {
-                    SavedChatAttachment(
-                        uri = attObj.optString("uri"),
-                        name = attObj.optString("name", "Archivo"),
-                        mime = attObj.optString("mime").takeIf { it.isNotBlank() && it != "null" },
-                        sizeBytes = if (attObj.has("sizeBytes") && !attObj.isNull("sizeBytes")) {
-                            attObj.getLong("sizeBytes")
-                        } else {
-                            null
-                        }
+                val attsArr = m.optJSONArray("attachments")
+                val attachments = when {
+                    attsArr != null -> List(attsArr.length()) { k ->
+                        parseSavedAttachment(attsArr.getJSONObject(k))
+                    }
+                    m.optJSONObject("attachment") != null -> listOf(
+                        parseSavedAttachment(m.getJSONObject("attachment"))
                     )
-                } else {
-                    null
+                    else -> emptyList()
                 }
                 SavedChatMessage(
                     text = m.optString("text"),
                     fromUser = m.optBoolean("fromUser"),
-                    attachment = att
+                    attachments = attachments
                 )
             }
             SavedConversation(
@@ -1155,16 +1289,19 @@ fun persistSavedConversations(context: Context, list: List<SavedConversation>) {
                 JSONObject().apply {
                     put("text", msg.text)
                     put("fromUser", msg.fromUser)
-                    if (msg.attachment != null) {
-                        put(
-                            "attachment",
-                            JSONObject().apply {
-                                put("uri", msg.attachment.uri)
-                                put("name", msg.attachment.name)
-                                put("mime", msg.attachment.mime ?: JSONObject.NULL)
-                                put("sizeBytes", msg.attachment.sizeBytes ?: JSONObject.NULL)
-                            }
-                        )
+                    if (msg.attachments.isNotEmpty()) {
+                        val attsArr = JSONArray()
+                        msg.attachments.forEach { att ->
+                            attsArr.put(
+                                JSONObject().apply {
+                                    put("uri", att.uri)
+                                    put("name", att.name)
+                                    put("mime", att.mime ?: JSONObject.NULL)
+                                    put("sizeBytes", att.sizeBytes ?: JSONObject.NULL)
+                                }
+                            )
+                        }
+                        put("attachments", attsArr)
                     }
                 }
             )
