@@ -1,9 +1,13 @@
 package com.miasistente.app
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.location.Geocoder
+import android.location.LocationManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -40,10 +44,14 @@ import com.miasistente.app.ui.ChatViewModel
 import com.miasistente.app.ui.IrisScreen
 import com.miasistente.app.ui.PermissionKind
 import com.miasistente.app.ui.PermissionPrompt
+import com.miasistente.app.ui.saveUriToIrisMedia
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
+import java.io.FileOutputStream
+import java.util.Locale
 
 class MainActivity : ComponentActivity() {
 
@@ -59,11 +67,33 @@ class MainActivity : ComponentActivity() {
     private var avatarEnabled by mutableStateOf(false)
     private var darkTheme by mutableStateOf(true)
     private var permissionPrompt by mutableStateOf<PermissionPrompt?>(null)
+    private var pendingAttachment by mutableStateOf<ChatAttachment?>(null)
 
     private val pickFile = registerForActivityResult(
         ActivityResultContracts.GetContent()
     ) { uri ->
-        if (uri != null) agregarAdjunto(uri)
+        if (uri != null) prepararAdjunto(uri, esFoto = false)
+    }
+
+    private val pickPhoto = registerForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri ->
+        if (uri != null) prepararAdjunto(uri, esFoto = true)
+    }
+
+    private val takePicture = registerForActivityResult(
+        ActivityResultContracts.TakePicturePreview()
+    ) { bitmap ->
+        if (bitmap != null) {
+            lifecycleScope.launch {
+                val adjunto = withContext(Dispatchers.IO) { guardarCapturaCamara(bitmap) }
+                if (adjunto != null) {
+                    pendingAttachment = adjunto
+                } else {
+                    aviso("No pude procesar la foto de la cámara")
+                }
+            }
+        }
     }
 
     private val pickModel = registerForActivityResult(
@@ -79,6 +109,17 @@ class MainActivity : ComponentActivity() {
             activarMicrofono()
         } else {
             aviso("Necesito el permiso del micrófono para escucharte")
+        }
+    }
+
+    private val pedirPermisoUbicacion = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { resultados ->
+        val concedido = resultados.values.any { it }
+        if (concedido) {
+            compartirUbicacionGps()
+        } else {
+            aviso("Concede el permiso de ubicación para usar el GPS")
         }
     }
 
@@ -117,6 +158,7 @@ class MainActivity : ComponentActivity() {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     val isServiceRunning by AsistenteService.isRunning.collectAsState()
                     val audio by AsistenteService.estadoAudio.collectAsState()
+                    val isSpeaking by vozAsistente.isSpeaking.collectAsState()
 
                     val view = LocalView.current
                     SideEffect {
@@ -149,16 +191,21 @@ class MainActivity : ComponentActivity() {
                         onDarkThemeChange = { cambiarTema(it) },
                         messages = chat.messages,
                         isThinking = chat.isThinking,
+                        isSpeaking = isSpeaking,
                         micActive = isServiceRunning,
                         micPulse = isServiceRunning && audio.hayVoz,
                         voiceStatus = voiceStatus,
                         permissionPrompt = permissionPrompt,
+                        pendingAttachment = pendingAttachment,
+                        onClearAttachment = { pendingAttachment = null },
                         onPermissionConfirm = { confirmarPermiso() },
                         onPermissionDismiss = { permissionPrompt = null },
                         onAvatarChanged = { avatarEnabled = it },
                         onSend = { enviar(it) },
                         onVoice = { alternarMicrofono(isServiceRunning) },
+                        onStopSpeaking = { vozAsistente.detener() },
                         onAttach = { pickFile.launch("*/*") },
+                        onPhotoSelected = { uri -> prepararAdjunto(uri, esFoto = true) },
                         onAction = { destination -> manejarAccion(destination) }
                     )
                 }
@@ -167,11 +214,20 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun enviar(texto: String) {
-        chat.addUser(texto)
+        val adjuntoPendiente = pendingAttachment
+        if (texto.isBlank() && adjuntoPendiente == null) return
+
+        if (adjuntoPendiente != null) {
+            chat.addAttachment(adjuntoPendiente)
+            pendingAttachment = null
+        }
+        if (texto.isNotBlank()) {
+            chat.addUser(texto)
+        }
+
         chat.updateThinking(true)
 
-        // "Resume el archivo": se usa el último adjunto que no sea una imagen.
-        val adjuntoParaResumir = if (PoliticaArchivos.pideResumirArchivo(texto)) {
+        val adjuntoObjetivo = adjuntoPendiente ?: if (PoliticaArchivos.pideResumirArchivo(texto)) {
             chat.messages.lastOrNull { it.attachment != null && !it.attachment.isImage }?.attachment
         } else {
             null
@@ -181,28 +237,42 @@ class MainActivity : ComponentActivity() {
             AsistenteService.updateAssistantState(AssistantState.THINKING)
             try {
                 val resultado = withContext(Dispatchers.IO) {
-                    if (adjuntoParaResumir != null) {
-                        val lectura = PoliticaArchivos.leer(
-                            contentResolver,
-                            Uri.parse(adjuntoParaResumir.uri),
-                            adjuntoParaResumir.name,
-                            adjuntoParaResumir.mime,
-                            adjuntoParaResumir.sizeBytes
-                        )
-                        procesador.resumirArchivo(adjuntoParaResumir.name, lectura)
-                    } else {
-                        procesador.procesar(texto)
+                    when {
+                        adjuntoObjetivo != null && !adjuntoObjetivo.isImage -> {
+                            val lectura = PoliticaArchivos.leer(
+                                contentResolver,
+                                Uri.parse(adjuntoObjetivo.uri),
+                                adjuntoObjetivo.name,
+                                adjuntoObjetivo.mime,
+                                adjuntoObjetivo.sizeBytes
+                            )
+                            procesador.resumirArchivo(
+                                nombre = adjuntoObjetivo.name,
+                                lectura = lectura,
+                                instruccionUsuario = texto.takeIf { it.isNotBlank() }
+                            )
+                        }
+                        adjuntoObjetivo != null && adjuntoObjetivo.isImage -> {
+                            val consultaImagen = if (texto.isBlank()) {
+                                "El usuario adjuntó la imagen «${adjuntoObjetivo.name}». Indícale brevemente cómo puedes ayudarle con ella."
+                            } else {
+                                "$texto (imagen adjunta: ${adjuntoObjetivo.name})"
+                            }
+                            procesador.procesar(consultaImagen)
+                        }
+                        else -> procesador.procesar(texto)
                     }
                 }
                 val respuestaFinal = resultado.mensaje.ifBlank { "Listo." }
                 chat.addAssistant(respuestaFinal)
-                vozAsistente.hablar(respuestaFinal)
+                if (resultado.exito) {
+                    vozAsistente.hablar(respuestaFinal)
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 val errorMsg = "No pude completar eso: ${e.message ?: "error desconocido"}"
                 chat.addAssistant(errorMsg)
-                vozAsistente.hablar(errorMsg)
             } finally {
                 chat.updateThinking(false)
                 AsistenteService.updateAssistantState(AssistantState.IDLE)
@@ -210,16 +280,37 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun agregarAdjunto(uri: Uri) {
+    private fun prepararAdjunto(uri: Uri, esFoto: Boolean) {
         lifecycleScope.launch {
-            val adjunto = withContext(Dispatchers.IO) { leerAdjunto(uri) }
-            chat.addAttachment(adjunto)
+            val adjunto = withContext(Dispatchers.IO) {
+                val item = leerAdjunto(uri)
+                val tipo = if (esFoto || item.isImage) "photo" else "file"
+                saveUriToIrisMedia(applicationContext, uri, tipo)
+                item
+            }
+            pendingAttachment = adjunto
+        }
+    }
+
+    private fun guardarCapturaCamara(bitmap: Bitmap): ChatAttachment? {
+        return try {
+            val dir = File(cacheDir, "camara").apply { mkdirs() }
+            val nombre = "foto_${System.currentTimeMillis()}.png"
+            val archivo = File(dir, nombre)
+            FileOutputStream(archivo).use { out ->
+                bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+            }
+            val uri = Uri.fromFile(archivo)
+            saveUriToIrisMedia(applicationContext, uri, "photo")
+            ChatAttachment(uri.toString(), nombre, "image/png", archivo.length())
+        } catch (_: Exception) {
+            null
         }
     }
 
     private fun leerAdjunto(uri: Uri): ChatAttachment {
         val mime = contentResolver.getType(uri)
-        var nombre = uri.lastPathSegment ?: "archivo"
+        var nombre = uri.lastPathSegment?.substringAfterLast('/') ?: "archivo"
         var tamano: Long? = null
         try {
             contentResolver.query(uri, null, null, null, null)?.use { cursor ->
@@ -247,6 +338,70 @@ class MainActivity : ComponentActivity() {
                 if (resultado.isSuccess) "IA local lista"
                 else resultado.exceptionOrNull()?.message ?: "No pude importar el modelo"
             )
+        }
+    }
+
+    private fun tienePermisoUbicacion(): Boolean {
+        val fine = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) ==
+            PackageManager.PERMISSION_GRANTED
+        val coarse = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) ==
+            PackageManager.PERMISSION_GRANTED
+        return fine || coarse
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun compartirUbicacionGps() {
+        if (!tienePermisoUbicacion()) {
+            pedirPermisoUbicacion.launch(
+                arrayOf(
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.ACCESS_COARSE_LOCATION
+                )
+            )
+            return
+        }
+
+        lifecycleScope.launch {
+            val textoUbicacion = withContext(Dispatchers.IO) {
+                try {
+                    val lm = getSystemService(LocationManager::class.java)
+                    val proveedores = listOf(
+                        LocationManager.GPS_PROVIDER,
+                        LocationManager.NETWORK_PROVIDER,
+                        LocationManager.PASSIVE_PROVIDER
+                    )
+                    val loc = proveedores.firstNotNullOfOrNull { proveedor ->
+                        runCatching { lm?.getLastKnownLocation(proveedor) }.getOrNull()
+                    }
+                    if (loc == null) {
+                        null
+                    } else {
+                        val ciudad = runCatching {
+                            @Suppress("DEPRECATION")
+                            val dirs = Geocoder(this@MainActivity, Locale.getDefault())
+                                .getFromLocation(loc.latitude, loc.longitude, 1)
+                            val d = dirs?.firstOrNull()
+                            listOfNotNull(d?.locality ?: d?.subAdminArea, d?.countryName)
+                                .joinToString(", ")
+                                .takeIf { it.isNotBlank() }
+                        }.getOrNull()
+
+                        if (ciudad != null) {
+                            "Mi ubicación actual: $ciudad (${String.format(Locale.US, "%.4f, %.4f", loc.latitude, loc.longitude)})"
+                        } else {
+                            "Mi ubicación actual: ${String.format(Locale.US, "%.5f, %.5f", loc.latitude, loc.longitude)}"
+                        }
+                    }
+                } catch (_: Exception) {
+                    null
+                }
+            }
+
+            if (textoUbicacion != null) {
+                enviar(textoUbicacion)
+            } else {
+                aviso("Activa el GPS del teléfono e inténtalo de nuevo")
+            }
         }
     }
 
@@ -332,6 +487,11 @@ class MainActivity : ComponentActivity() {
             "sign_out" -> cerrarSesion()
             "sign_in" -> iniciarSesionGoogle()
             "import_model" -> pickModel.launch("*/*")
+            "open_photos" -> pickPhoto.launch("image/*")
+            "open_camera" -> takePicture.launch(null)
+            "open_files", "open_drive" -> pickFile.launch("*/*")
+            "use_gps_location" -> compartirUbicacionGps()
+            "stop_speaking", "stop_external_agent_voice" -> vozAsistente.detener()
             "search" -> aviso("Búsqueda próximamente")
             "gallery" -> aviso("Galería próximamente")
         }
