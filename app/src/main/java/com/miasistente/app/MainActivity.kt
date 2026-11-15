@@ -32,6 +32,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import com.miasistente.app.auth.GoogleSignInManager
 import com.miasistente.app.auth.GoogleSignInResult
 import com.miasistente.app.comandos.EjecutorLocal
+import com.miasistente.app.comandos.LecturaArchivo
 import com.miasistente.app.comandos.ModeloLocal
 import com.miasistente.app.comandos.PoliticaArchivos
 import com.miasistente.app.comandos.ProcesadorComandos
@@ -76,32 +77,40 @@ class MainActivity : ComponentActivity() {
     private var avatarEnabled by mutableStateOf(false)
     private var darkTheme by mutableStateOf(true)
     private var permissionPrompt by mutableStateOf<PermissionPrompt?>(null)
-    private var pendingAttachment by mutableStateOf<ChatAttachment?>(null)
+    private val pendingAttachments = mutableStateListOf<ChatAttachment>()
+    private var speakingMessageText by mutableStateOf<String?>(null)
+    private var isAppInForeground by mutableStateOf(false)
 
     private var conversations by mutableStateOf<List<SavedConversation>>(emptyList())
     private var activeConversationId by mutableStateOf("conv_${System.currentTimeMillis()}")
     private val thinkingConversations = mutableStateMapOf<String, Boolean>()
 
     private val pickFile = registerForActivityResult(
-        ActivityResultContracts.GetContent()
-    ) { uri ->
-        if (uri != null) prepararAdjunto(uri, esFoto = false)
+        ActivityResultContracts.GetMultipleContents()
+    ) { uris ->
+        if (uris.isNotEmpty()) prepararAdjuntos(uris, esFoto = false)
     }
 
     private val pickPhoto = registerForActivityResult(
-        ActivityResultContracts.GetContent()
-    ) { uri ->
-        if (uri != null) prepararAdjunto(uri, esFoto = true)
+        ActivityResultContracts.GetMultipleContents()
+    ) { uris ->
+        if (uris.isNotEmpty()) prepararAdjuntos(uris, esFoto = true)
     }
 
     private val takePicture = registerForActivityResult(
         ActivityResultContracts.TakePicturePreview()
     ) { bitmap ->
         if (bitmap != null) {
+            if (pendingAttachments.size >= MAX_ADJUNTOS) {
+                aviso("Máximo $MAX_ADJUNTOS archivos adjuntos por mensaje")
+                return@registerForActivityResult
+            }
             lifecycleScope.launch {
                 val adjunto = withContext(Dispatchers.IO) { guardarCapturaCamara(bitmap) }
                 if (adjunto != null) {
-                    pendingAttachment = adjunto
+                    if (pendingAttachments.size < MAX_ADJUNTOS) {
+                        pendingAttachments.add(adjunto)
+                    }
                 } else {
                     aviso("No pude procesar la foto de la cámara")
                 }
@@ -134,6 +143,17 @@ class MainActivity : ComponentActivity() {
         } else {
             aviso("Concede el permiso de ubicación para usar el GPS")
         }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        isAppInForeground = true
+    }
+
+    override fun onStop() {
+        isAppInForeground = false
+        detenerVozSilenciosamente()
+        super.onStop()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -171,8 +191,8 @@ class MainActivity : ComponentActivity() {
                         convId = targetConvId,
                         nuevoMensaje = SavedChatMessage(text = evento.respuesta, fromUser = false)
                     )
-                    if (targetConvId == activeConversationId) {
-                        vozAsistente.hablar(evento.respuesta)
+                    if (targetConvId == activeConversationId && isAppInForeground) {
+                        reproducirVoz(evento.respuesta)
                     }
                 }
             }
@@ -222,20 +242,26 @@ class MainActivity : ComponentActivity() {
                         onDeleteConversation = { eliminarConversacion(it) },
                         isThinking = activeIsThinking,
                         isSpeaking = isSpeaking,
+                        speakingMessageText = speakingMessageText,
                         micActive = isServiceRunning,
                         micPulse = isServiceRunning && audio.hayVoz,
                         voiceStatus = voiceStatus,
                         permissionPrompt = permissionPrompt,
-                        pendingAttachment = pendingAttachment,
-                        onClearAttachment = { pendingAttachment = null },
+                        pendingAttachments = pendingAttachments,
+                        onRemoveAttachment = { index ->
+                            if (index in pendingAttachments.indices) {
+                                pendingAttachments.removeAt(index)
+                            }
+                        },
                         onPermissionConfirm = { confirmarPermiso() },
                         onPermissionDismiss = { permissionPrompt = null },
                         onAvatarChanged = { avatarEnabled = it },
                         onSend = { enviar(it) },
                         onVoice = { alternarMicrofono(isServiceRunning) },
-                        onStopSpeaking = { vozAsistente.detener() },
+                        onSpeakMessage = { alternarLecturaMensaje(it) },
+                        onStopSpeaking = { detenerVozSilenciosamente() },
                         onAttach = { pickFile.launch("*/*") },
-                        onPhotoSelected = { uri -> prepararAdjunto(uri, esFoto = true) },
+                        onPhotoSelected = { uri -> prepararAdjuntos(listOf(uri), esFoto = true) },
                         onAction = { destination -> manejarAccion(destination) }
                     )
                 }
@@ -243,33 +269,60 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun iniciarNuevaConversacion() {
+    private fun detenerVozSilenciosamente() {
+        speakingMessageText = null
         vozAsistente.detener()
-        pendingAttachment = null
+    }
+
+    private suspend fun reproducirVoz(texto: String) {
+        speakingMessageText = texto
+        try {
+            vozAsistente.hablar(texto)
+        } finally {
+            if (speakingMessageText == texto) {
+                speakingMessageText = null
+            }
+        }
+    }
+
+    private fun alternarLecturaMensaje(texto: String) {
+        if (texto.isBlank()) return
+        if (vozAsistente.isSpeaking.value && speakingMessageText == texto) {
+            detenerVozSilenciosamente()
+            return
+        }
+        detenerVozSilenciosamente()
+        lifecycleScope.launch {
+            reproducirVoz(texto)
+        }
+    }
+
+    private fun iniciarNuevaConversacion() {
+        detenerVozSilenciosamente()
+        pendingAttachments.clear()
         chat.clear()
         chat.updateThinking(false)
         activeConversationId = "conv_${System.currentTimeMillis()}"
     }
 
     private fun seleccionarConversacion(conv: SavedConversation) {
-        vozAsistente.detener()
-        pendingAttachment = null
+        detenerVozSilenciosamente()
+        pendingAttachments.clear()
         activeConversationId = conv.id
         chat.clear()
         conv.messages.forEach { saved ->
-            if (saved.attachment != null) {
-                chat.addAttachment(
-                    ChatAttachment(
-                        uri = saved.attachment.uri,
-                        name = saved.attachment.name,
-                        mime = saved.attachment.mime,
-                        sizeBytes = saved.attachment.sizeBytes
-                    )
+            val adjuntos = saved.attachments.map {
+                ChatAttachment(
+                    uri = it.uri,
+                    name = it.name,
+                    mime = it.mime,
+                    sizeBytes = it.sizeBytes
                 )
             }
-            if (saved.text.isNotBlank()) {
-                if (saved.fromUser) chat.addUser(saved.text)
-                else chat.addAssistant(saved.text)
+            if (saved.fromUser) {
+                chat.addUser(saved.text, adjuntos)
+            } else if (saved.text.isNotBlank()) {
+                chat.addAssistant(saved.text)
             }
         }
         chat.updateThinking(thinkingConversations[conv.id] == true)
@@ -320,52 +373,48 @@ class MainActivity : ComponentActivity() {
 
     private fun derivarTituloConversacion(mensajes: List<SavedChatMessage>): String {
         val base = mensajes.firstOrNull { it.fromUser && it.text.isNotBlank() }?.text
-            ?: mensajes.firstOrNull { it.attachment != null }?.attachment?.name
+            ?: mensajes.firstOrNull { it.attachments.isNotEmpty() }?.attachments?.firstOrNull()?.name
             ?: "Nueva conversación"
         return if (base.length > 34) base.take(34) + "…" else base
     }
 
     private fun enviar(texto: String) {
-        val adjuntoPendiente = pendingAttachment
-        if (texto.isBlank() && adjuntoPendiente == null) return
+        val adjuntosPendientes = pendingAttachments.toList()
+        if (texto.isBlank() && adjuntosPendientes.isEmpty()) return
 
         val targetConvId = activeConversationId
+        pendingAttachments.clear()
 
-        if (adjuntoPendiente != null) {
-            chat.addAttachment(adjuntoPendiente)
-            pendingAttachment = null
-            guardarMensajeEnHistorial(
-                convId = targetConvId,
-                nuevoMensaje = SavedChatMessage(
-                    text = "",
-                    fromUser = true,
-                    attachment = SavedChatAttachment(
-                        uri = adjuntoPendiente.uri,
-                        name = adjuntoPendiente.name,
-                        mime = adjuntoPendiente.mime,
-                        sizeBytes = adjuntoPendiente.sizeBytes
+        chat.addUser(texto, adjuntosPendientes)
+        guardarMensajeEnHistorial(
+            convId = targetConvId,
+            nuevoMensaje = SavedChatMessage(
+                text = texto,
+                fromUser = true,
+                attachments = adjuntosPendientes.map {
+                    SavedChatAttachment(
+                        uri = it.uri,
+                        name = it.name,
+                        mime = it.mime,
+                        sizeBytes = it.sizeBytes
                     )
-                )
+                }
             )
-        }
-
-        if (texto.isNotBlank()) {
-            chat.addUser(texto)
-            guardarMensajeEnHistorial(
-                convId = targetConvId,
-                nuevoMensaje = SavedChatMessage(text = texto, fromUser = true)
-            )
-        }
+        )
 
         thinkingConversations[targetConvId] = true
         if (targetConvId == activeConversationId) {
             chat.updateThinking(true)
         }
 
-        val adjuntoObjetivo = adjuntoPendiente ?: if (PoliticaArchivos.pideResumirArchivo(texto)) {
-            chat.messages.lastOrNull { it.attachment != null && !it.attachment.isImage }?.attachment
-        } else {
-            null
+        val adjuntosObjetivo = adjuntosPendientes.ifEmpty {
+            if (PoliticaArchivos.pideResumirArchivo(texto)) {
+                chat.messages.lastOrNull { msg ->
+                    msg.attachments.any { !it.isImage }
+                }?.attachments.orEmpty()
+            } else {
+                emptyList()
+            }
         }
 
         lifecycleScope.launch {
@@ -373,26 +422,57 @@ class MainActivity : ComponentActivity() {
             try {
                 val resultado = withTimeoutOrNull(30_000L) {
                     withContext(Dispatchers.IO) {
+                        val archivosTexto = adjuntosObjetivo.filter { !it.isImage }
+                        val imagenes = adjuntosObjetivo.filter { it.isImage }
+
                         when {
-                            adjuntoObjetivo != null && !adjuntoObjetivo.isImage -> {
+                            archivosTexto.size == 1 && imagenes.isEmpty() -> {
+                                val archivo = archivosTexto.first()
                                 val lectura = PoliticaArchivos.leer(
                                     contentResolver,
-                                    Uri.parse(adjuntoObjetivo.uri),
-                                    adjuntoObjetivo.name,
-                                    adjuntoObjetivo.mime,
-                                    adjuntoObjetivo.sizeBytes
+                                    Uri.parse(archivo.uri),
+                                    archivo.name,
+                                    archivo.mime,
+                                    archivo.sizeBytes
                                 )
                                 procesador.resumirArchivo(
-                                    nombre = adjuntoObjetivo.name,
+                                    nombre = archivo.name,
                                     lectura = lectura,
                                     instruccionUsuario = texto.takeIf { it.isNotBlank() }
                                 )
                             }
-                            adjuntoObjetivo != null && adjuntoObjetivo.isImage -> {
+                            archivosTexto.isNotEmpty() -> {
+                                val bloques = mutableListOf<String>()
+                                for (archivo in archivosTexto) {
+                                    when (
+                                        val lectura = PoliticaArchivos.leer(
+                                            contentResolver,
+                                            Uri.parse(archivo.uri),
+                                            archivo.name,
+                                            archivo.mime,
+                                            archivo.sizeBytes
+                                        )
+                                    ) {
+                                        is LecturaArchivo.Texto ->
+                                            bloques.add("--- ${archivo.name} ---\n${lectura.contenido.trim()}")
+                                        is LecturaArchivo.Rechazado ->
+                                            return@withContext ResultadoComando(false, lectura.motivo)
+                                    }
+                                }
+                                val combinado = bloques.joinToString("\n\n")
+                                val nombres = archivosTexto.joinToString(", ") { it.name }
+                                procesador.resumirArchivo(
+                                    nombre = nombres,
+                                    lectura = LecturaArchivo.Texto(combinado),
+                                    instruccionUsuario = texto.takeIf { it.isNotBlank() }
+                                )
+                            }
+                            imagenes.isNotEmpty() -> {
+                                val listaNombres = imagenes.joinToString(", ") { it.name }
                                 val consultaImagen = if (texto.isBlank()) {
-                                    "El usuario adjuntó la imagen «${adjuntoObjetivo.name}». Indícale brevemente cómo puedes ayudarle con ella."
+                                    "El usuario adjuntó ${imagenes.size} imagen(es) ($listaNombres). Indícale brevemente cómo puedes ayudarle con ellas."
                                 } else {
-                                    "$texto (imagen adjunta: ${adjuntoObjetivo.name})"
+                                    "$texto (imágenes adjuntas: $listaNombres)"
                                 }
                                 procesador.procesar(consultaImagen)
                             }
@@ -413,8 +493,8 @@ class MainActivity : ComponentActivity() {
 
                 if (targetConvId == activeConversationId) {
                     chat.addAssistant(respuestaFinal)
-                    if (resultado.exito) {
-                        vozAsistente.hablar(respuestaFinal)
+                    if (resultado.exito && isAppInForeground) {
+                        reproducirVoz(respuestaFinal)
                     }
                 }
             } catch (e: CancellationException) {
@@ -440,20 +520,31 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun prepararAdjunto(uri: Uri, esFoto: Boolean) {
+    private fun prepararAdjuntos(uris: List<Uri>, esFoto: Boolean) {
+        val espacioDisponible = MAX_ADJUNTOS - pendingAttachments.size
+        if (espacioDisponible <= 0) {
+            aviso("Máximo $MAX_ADJUNTOS archivos adjuntos por mensaje")
+            return
+        }
+        val seleccionados = uris.take(espacioDisponible)
+        if (uris.size > espacioDisponible) {
+            aviso("Solo se añadieron $espacioDisponible de ${uris.size} (máximo $MAX_ADJUNTOS)")
+        }
+
         lifecycleScope.launch {
-            val adjunto = withContext(Dispatchers.IO) {
-                val item = leerAdjunto(uri)
-                val tipo = if (esFoto || item.isImage) "photo" else "file"
-                val uriPersistente = copiarArchivoLocalmente(uri, item.name)
-                saveUriToIrisMedia(applicationContext, uri, tipo)
-                if (uriPersistente != null) {
-                    item.copy(uri = uriPersistente)
-                } else {
-                    item
+            val nuevos = withContext(Dispatchers.IO) {
+                seleccionados.map { uri ->
+                    val item = leerAdjunto(uri)
+                    val tipo = if (esFoto || item.isImage) "photo" else "file"
+                    val uriPersistente = copiarArchivoLocalmente(uri, item.name)
+                    saveUriToIrisMedia(applicationContext, uri, tipo)
+                    if (uriPersistente != null) item.copy(uri = uriPersistente) else item
                 }
             }
-            pendingAttachment = adjunto
+            val cupoRestante = MAX_ADJUNTOS - pendingAttachments.size
+            if (cupoRestante > 0) {
+                pendingAttachments.addAll(nuevos.take(cupoRestante))
+            }
         }
     }
 
@@ -674,7 +765,7 @@ class MainActivity : ComponentActivity() {
             "open_camera" -> takePicture.launch(null)
             "open_files", "open_drive" -> pickFile.launch("*/*")
             "use_gps_location" -> compartirUbicacionGps()
-            "stop_speaking", "stop_external_agent_voice" -> vozAsistente.detener()
+            "stop_speaking", "stop_external_agent_voice" -> detenerVozSilenciosamente()
             "search" -> aviso("Búsqueda próximamente")
             "gallery" -> aviso("Galería próximamente")
         }
@@ -711,5 +802,9 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         vozAsistente.cerrar()
         super.onDestroy()
+    }
+
+    private companion object {
+        const val MAX_ADJUNTOS = 5
     }
 }
