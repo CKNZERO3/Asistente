@@ -40,12 +40,12 @@ function secreto(env, nombre) {
   return typeof valor === "string" ? valor.trim() : "";
 }
 
-// Diagnóstico temporal: indica qué secreto falta y los NOMBRES (nunca los
-// valores) de lo que el Worker sí recibe. Se quitará cuando todo funcione.
+// Si falta un secreto, el detalle (solo nombres, nunca valores) queda en los registros del
+// Worker; al cliente solo se le dice que el servicio no está disponible.
 function faltaSecreto(env, nombre) {
   const vistos = Object.keys(env).sort().join(", ") || "ninguna";
   console.error("Falta el secreto " + nombre + ". Variables vistas: " + vistos);
-  return error(500, "Servicio no disponible: falta " + nombre + " (variables vistas: " + vistos + ")");
+  return error(500, "Servicio no disponible");
 }
 
 function iguales(a, b) {
