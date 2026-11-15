@@ -1,9 +1,7 @@
 package com.miasistente.app.ui
 
 import android.content.Context
-import android.content.Intent
 import android.net.Uri
-import android.provider.MediaStore
 import android.provider.OpenableColumns
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.foundation.Image
@@ -19,8 +17,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.*
+import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Place
+import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -139,8 +138,9 @@ fun AttachBottomSheet(
     val context = LocalContext.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
     val savedPhotos = remember { loadIrisMedia(context).filter { it.type == "photo" } }
-    
+
     var showMapSheet by remember { mutableStateOf(false) }
+    var customLocation by remember { mutableStateOf("") }
 
     ModalBottomSheet(
         onDismissRequest = onDismissRequest,
@@ -154,51 +154,82 @@ fun AttachBottomSheet(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(460.dp)
                         .padding(horizontal = 24.dp, vertical = 8.dp)
                 ) {
                     Text("Ubicación", color = p.text, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
-                    Spacer(Modifier.height(16.dp))
+                    Spacer(Modifier.height(14.dp))
                     Box(
                         modifier = Modifier
-                            .weight(1f)
                             .fillMaxWidth()
+                            .height(170.dp)
                             .clip(RoundedCornerShape(20.dp))
                             .background(MaterialTheme.colorScheme.surface)
-                            .border(1.dp, p.outline, RoundedCornerShape(20.dp))
+                            .border(1.dp, p.outline, RoundedCornerShape(20.dp)),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Column(
-                            modifier = Modifier.align(Alignment.Center),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Icon(
                                 Icons.Default.Place,
                                 contentDescription = "Punto en el mapa",
                                 tint = p.accent,
-                                modifier = Modifier.size(52.dp)
+                                modifier = Modifier.size(44.dp)
                             )
-                            Spacer(Modifier.height(8.dp))
+                            Spacer(Modifier.height(6.dp))
                             Text(
-                                text = "Ubicación actual lista",
-                                color = Color.LightGray,
-                                fontSize = 14.sp
+                                text = "Comparte tu GPS o escribe una ubicación",
+                                color = p.muted,
+                                fontSize = 13.sp
                             )
                         }
                     }
-                    Spacer(Modifier.height(24.dp))
-                    Button(
+
+                    Spacer(Modifier.height(14.dp))
+
+                    OutlinedButton(
                         onClick = {
                             showMapSheet = false
-                            onQuickAction("Ubicación enlazada: Barquisimeto, Venezuela ")
+                            onMap()
                         },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(52.dp),
+                            .height(48.dp),
+                        shape = RoundedCornerShape(14.dp)
+                    ) {
+                        Icon(Icons.Default.MyLocation, contentDescription = null, tint = p.accent, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Usar mi ubicación actual (GPS)", color = p.text, fontSize = 14.sp)
+                    }
+
+                    Spacer(Modifier.height(12.dp))
+
+                    OutlinedTextField(
+                        value = customLocation,
+                        onValueChange = { customLocation = it },
+                        singleLine = true,
+                        placeholder = { Text("Ej: Caracas, Venezuela", color = p.muted, fontSize = 14.sp) },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(14.dp)
+                    )
+
+                    Spacer(Modifier.height(14.dp))
+
+                    Button(
+                        onClick = {
+                            val ubicacion = customLocation.trim()
+                            if (ubicacion.isNotEmpty()) {
+                                showMapSheet = false
+                                onQuickAction("Ubicación enlazada: $ubicacion ")
+                            }
+                        },
+                        enabled = customLocation.isNotBlank(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(50.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = p.accent)
                     ) {
-                        Text("Compartir ubicación", color = Color.White, fontSize = 16.sp)
+                        Text("Compartir ubicación escrita", color = Color.White, fontSize = 15.sp)
                     }
-                    Spacer(Modifier.height(16.dp))
+                    Spacer(Modifier.navigationBarsPadding())
                 }
             } else {
                 Column(
@@ -213,17 +244,8 @@ fun AttachBottomSheet(
                             .padding(bottom = 14.dp),
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        AttachBubble("Fotos", Icons.Outlined.Image) {
-                            launchSafeIntent(
-                                context,
-                                Intent(Intent.ACTION_PICK, MediaStore.Images.Media.EXTERNAL_CONTENT_URI)
-                            )
-                            onPhotos()
-                        }
-                        AttachBubble("Cámara", Icons.Outlined.PhotoCamera) {
-                            launchSafeIntent(context, Intent(MediaStore.ACTION_IMAGE_CAPTURE))
-                            onCamera()
-                        }
+                        AttachBubble("Fotos", Icons.Outlined.Image, onPhotos)
+                        AttachBubble("Cámara", Icons.Outlined.PhotoCamera, onCamera)
                         AttachBubble("Archivos", Icons.Outlined.AttachFile, onFiles)
                         AttachBubble("Drive", Icons.Outlined.AddToDrive, onDrive)
                         AttachBubble("Cuadernos", Icons.Outlined.Book, onNotebooks)
@@ -314,16 +336,6 @@ fun AttachBottomSheet(
                 }
             }
         }
-    }
-}
-
-private fun launchSafeIntent(context: Context, intent: Intent): Boolean {
-    return try {
-        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        context.startActivity(intent)
-        true
-    } catch (e: Exception) {
-        false
     }
 }
 
