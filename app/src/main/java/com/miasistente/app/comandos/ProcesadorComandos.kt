@@ -94,10 +94,9 @@ class ProcesadorComandos(context: Context) {
         habilidades.peticionClima(pregunta)?.let { return consultarClima(it) }
 
         val seleccion = IrisModelSelector.seleccionar(pregunta)
-        val usarLocalPrimero = modeloLocal.disponible() && (
-            seleccion.categoria == CategoriaTarea.LIGERA ||
-                (seleccion.categoria == CategoriaTarea.GENERAL && pregunta.length <= MAX_CHARS_GENERAL_LOCAL)
-            )
+        // Solo las tareas LIGERAS van primero al modelo local; las preguntas de datos o
+        // conocimiento van a Gemini porque el modelo pequeño inventa respuestas.
+        val usarLocalPrimero = modeloLocal.disponible() && seleccion.categoria == CategoriaTarea.LIGERA
 
         if (usarLocalPrimero) {
             modeloLocal.generar(INSTRUCCION_LOCAL, pregunta)
@@ -170,7 +169,7 @@ class ProcesadorComandos(context: Context) {
         if (!Conectividad.hayInternet(appContext)) {
             if (intentarLocalSiFalla && modeloLocal.disponible()) {
                 modeloLocal.generar(INSTRUCCION_LOCAL, pregunta)
-                    .onSuccess { return ResultadoComando(true, it) }
+                    .onSuccess { return ResultadoComando(true, AVISO_SIN_NUBE + it) }
             }
             return ResultadoComando(false, "Ahora mismo no tengo conexión a internet.")
         }
@@ -182,7 +181,7 @@ class ProcesadorComandos(context: Context) {
             onFailure = { errorNube ->
                 if (intentarLocalSiFalla && modeloLocal.disponible()) {
                     modeloLocal.generar(INSTRUCCION_LOCAL, pregunta)
-                        .onSuccess { return ResultadoComando(true, it) }
+                        .onSuccess { return ResultadoComando(true, AVISO_SIN_NUBE + it) }
                 }
                 ResultadoComando(false, mensajeAmigable(errorNube))
             }
@@ -214,6 +213,7 @@ class ProcesadorComandos(context: Context) {
     }
 
     private companion object {
-        const val MAX_CHARS_GENERAL_LOCAL = 500
+        const val AVISO_SIN_NUBE =
+            "No pude consultar a Gemini; esta respuesta viene de mi modelo local y puede tener errores.\n\n"
     }
 }

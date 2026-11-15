@@ -12,6 +12,11 @@ data class SeleccionModelo(
     val motivo: String
 )
 
+/**
+ * LIGERA: la resuelve el modelo del teléfono (transformar texto, saludos, escritura creativa corta).
+ * GENERAL: preguntas de datos o conocimiento; el modelo local se equivoca, va a Gemini ligero.
+ * COMPLEJA: razonamiento o varios pasos; va a Gemini avanzado (cuota muy limitada).
+ */
 enum class CategoriaTarea {
     LIGERA,
     GENERAL,
@@ -47,8 +52,21 @@ object IrisModelSelector {
     )
 
     private val tareasLigeras = Regex(
-        """\b(resume|resumir|resumen|traduce|traducir|traduccion|corrige|corregir|correccion|extrae|extraer|clasifica|clasificar|reformula|reescribe|simplifica|simplificar|define|definir|definicion|sinonimo|sinonimos|antonimo|antonimos|ortografia)\b|""" +
+        """\b(resume|resumir|resumen|traduce|traducir|traduccion|corrige|corregir|correccion|extrae|extraer|clasifica|clasificar|reformula|reescribe|simplifica|simplificar|sinonimo|sinonimos|antonimo|antonimos|ortografia)\b|""" +
             """\b(como se dice|en ingles|en espanol|en frances|en portugues|en italiano|en aleman)\b"""
+    )
+
+    private const val MAX_CARACTERES_GENERACION = 500
+
+    // Solo la frase completa (saludo + nombre opcional): "hola, ¿capital de Francia?" NO cuenta.
+    private val saludos = Regex(
+        """^(?:hola|hey|buenas|buenos dias|buenas tardes|buenas noches|gracias|muchas gracias|adios|chao|hasta luego|que tal|como estas|como te va|quien eres|como te llamas)(?:,? iris)?$"""
+    )
+
+    // Escritura creativa corta. Nada de datos: "dame una lista de países" va a Gemini.
+    private val escrituraCreativa = Regex(
+        """^(?:escribe|escribeme|redacta|redactame|genera|generame|inventa|inventame|compon|componme|crea|creame|sugiere|sugiereme|cuentame|dame)\b.*""" +
+            """\b(poema|poesia|cuento|chiste|mensaje|correo|email|carta|frase|frases|slogan|saludo|idea|ideas|parrafo|cancion)\b"""
     )
 
     fun seleccionar(pregunta: String): SeleccionModelo {
@@ -71,6 +89,19 @@ object IrisModelSelector {
                 modelo = MODELO_LIGERO,
                 categoria = CategoriaTarea.LIGERA,
                 motivo = "La solicitud es una transformación o consulta breve."
+            )
+        }
+
+        val sinSignos = texto.trim(' ', '.', ',', ';', ':', '!', '?', '¿', '¡')
+        if (
+            sinSignos.isNotBlank() &&
+            (saludos.matches(sinSignos) ||
+                (sinSignos.length <= MAX_CARACTERES_GENERACION && escrituraCreativa.containsMatchIn(sinSignos)))
+        ) {
+            return SeleccionModelo(
+                modelo = MODELO_LIGERO,
+                categoria = CategoriaTarea.LIGERA,
+                motivo = "Saludo o escritura creativa corta: la resuelve el modelo local."
             )
         }
 

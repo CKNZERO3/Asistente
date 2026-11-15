@@ -50,4 +50,41 @@ class IrisModelSelectorTest {
         assertThat(IrisModelSelector.esModeloPermitido(IrisModelSelector.MODELO_GENERAL)).isTrue()
         assertThat(IrisModelSelector.esModeloPermitido("gemini-2.5-flash")).isFalse()
     }
+
+    @Test
+    fun preguntasDeDatosVanAGeminiNoAlModeloLocal() {
+        listOf(
+            "¿Cómo se llama el satélite que tiene la Tierra?",
+            "¿Cuál es la capital de Francia?",
+            "define resiliencia",
+            "dame una lista de países de Europa",
+            "cuéntame la historia de Roma",
+            "hola, ¿cuál es la capital de Francia?"
+        ).forEach {
+            assertThat(IrisModelSelector.seleccionar(it).categoria).isEqualTo(CategoriaTarea.GENERAL)
+        }
+    }
+
+    @Test
+    fun saludosYEscrituraCreativaCortaSeQuedanEnElTelefono() {
+        listOf(
+            "hola",
+            "Buenos días, Iris",
+            "gracias",
+            "escríbeme un poema de cuatro líneas sobre el mar",
+            "cuéntame un chiste",
+            "dame ideas para una fiesta de cumpleaños",
+            "redacta un mensaje para felicitar a mi madre"
+        ).forEach {
+            assertThat(IrisModelSelector.seleccionar(it).categoria).isEqualTo(CategoriaTarea.LIGERA)
+        }
+    }
+
+    @Test
+    fun escribirUnProgramaOUnInformeTecnicoEsComplejo() {
+        assertThat(IrisModelSelector.seleccionar("escribe un programa en Python").categoria)
+            .isEqualTo(CategoriaTarea.COMPLEJA)
+        assertThat(IrisModelSelector.seleccionar("redacta un informe técnico del proyecto").categoria)
+            .isEqualTo(CategoriaTarea.COMPLEJA)
+    }
 }
