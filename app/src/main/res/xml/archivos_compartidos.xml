@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Carpetas privadas de Iris que se pueden compartir con apps de notas (FileProvider). -->
+<paths>
+    <files-path name="adjuntos" path="iris_attachments/" />
+    <files-path name="medios" path="iris_media/" />
+</paths>

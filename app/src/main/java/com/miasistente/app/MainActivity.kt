@@ -31,6 +31,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import com.miasistente.app.auth.GoogleSignInManager
 import com.miasistente.app.auth.GoogleSignInResult
+import com.miasistente.app.comandos.AdjuntoNota
 import com.miasistente.app.comandos.EjecutorLocal
 import com.miasistente.app.comandos.LecturaArchivo
 import com.miasistente.app.comandos.ModeloLocal
@@ -422,6 +423,12 @@ class MainActivity : ComponentActivity() {
             try {
                 val resultado = withTimeoutOrNull(30_000L) {
                     withContext(Dispatchers.IO) {
+                        // "Guarda esta imagen en el cuaderno Recetas": va a Iris Notebook o a la app pedida.
+                        procesador.guardarAdjuntos(
+                            texto,
+                            adjuntosObjetivo.map { AdjuntoNota(it.uri, it.name, it.mime) }
+                        )?.let { return@withContext it }
+
                         val archivosTexto = adjuntosObjetivo.filter { !it.isImage }
                         val imagenes = adjuntosObjetivo.filter { it.isImage }
 
