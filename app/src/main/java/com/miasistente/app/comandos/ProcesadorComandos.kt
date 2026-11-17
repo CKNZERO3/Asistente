@@ -24,7 +24,8 @@ class ProcesadorComandos(context: Context) {
 
     suspend fun procesar(
         texto: String,
-        palabraClave: String = ajustes.palabraClave
+        palabraClave: String = ajustes.palabraClave,
+        ultimoMensajeAsistente: String? = null
     ): ResultadoComando {
         val comando = quitarPalabraClave(texto, palabraClave)
         if (comando.isBlank()) {
@@ -41,13 +42,29 @@ class ProcesadorComandos(context: Context) {
             }
             when (val intencion = parser.parsear(comando)) {
                 is Intencion.ConsultaIA -> responderConsulta(intencion.pregunta)
-                // Solo el contenido (sin las palabras de la orden) y en el destino pedido.
-                is Intencion.CrearNota -> notas.guardar(
-                    ExtractorNota.analizar(comando)
+                is Intencion.CrearNota -> {
+                    val base = ExtractorNota.analizar(comando)
                         ?: PeticionGuardar(ExtractorNota.limpiar(intencion.contenido), DestinoNota.SinEspecificar)
-                )
+
+                    val candidatoPrevio = (ultimoContenidoGenerado ?: ultimoMensajeAsistente)
+                        ?.removePrefix(AVISO_SIN_NUBE)
+                        ?.trim()
+                        ?.takeIf { it.isNotBlank() }
+
+                    val peticionFinal = if (
+                        base.contenido.isBlank() &&
+                        !base.mencionaAdjunto &&
+                        (base.refiereRespuestaAnterior || candidatoPrevio != null) &&
+                        candidatoPrevio != null
+                    ) {
+                        base.copy(contenido = ExtractorNota.limpiarRespuestaParaNota(candidatoPrevio))
+                    } else {
+                        base
+                    }
+
+                    notas.guardar(peticionFinal)
+                }
                 is Intencion.AbrirAplicacion -> local.ejecutar(intencion).also {
-                    // Apps favoritas: se aprende en segundo plano, sin latencia.
                     if (it.exito) memoria.registrarHabito(CONTEXTO_APPS, normalizar(intencion.nombreApp))
                 }
                 else -> local.ejecutar(intencion)
@@ -59,10 +76,6 @@ class ProcesadorComandos(context: Context) {
         }
     }
 
-    /**
-     * "Guarda esta imagen en el cuaderno Recetas" con adjuntos. Devuelve null si el texto no es
-     * una orden de guardar, y entonces la pantalla sigue con el flujo normal de adjuntos.
-     */
     suspend fun guardarAdjuntos(texto: String, adjuntos: List<AdjuntoNota>): ResultadoComando? {
         if (adjuntos.isEmpty()) return null
         val comando = quitarPalabraClave(texto, ajustes.palabraClave)
@@ -70,7 +83,6 @@ class ProcesadorComandos(context: Context) {
         return notas.guardar(peticion, adjuntos)
     }
 
-    /** Memoria esencial y seguimiento de notas: todo local, sin internet. */
     private suspend fun responderMemoria(accion: AccionMemoria): ResultadoComando? = when (accion) {
         AccionMemoria.NoSeGuardo -> notas.reintentarUltima()
         is AccionMemoria.Recordar -> {
@@ -115,7 +127,6 @@ class ProcesadorComandos(context: Context) {
                         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 )
             } catch (_: Exception) {
-                // El mensaje siguiente explica cómo habilitar el permiso.
             }
             return ResultadoComando(
                 false,
@@ -132,16 +143,14 @@ class ProcesadorComandos(context: Context) {
         )
     }
 
-    /**
-     * Antes de gastar cuota de Gemini se intenta resolver la consulta en el teléfono
-     * (hora, fecha, cálculos), con un servicio gratuito (clima) o con Gemma 3 1B local.
-     */
     private suspend fun responderConsulta(pregunta: String): ResultadoComando {
-        habilidades.responder(pregunta)?.let { return ResultadoComando(true, it) }
+        habilidades.responder(pregunta)?.let {
+            ultimoContenidoGenerado = it
+            return ResultadoComando(true, it)
+        }
         habilidades.peticionClima(pregunta)?.let { return consultarClima(it) }
 
         val seleccion = IrisModelSelector.seleccionar(pregunta)
-        // Noticias, resultados, precios, personajes…: solo sirve la búsqueda en internet.
         val tiempoReal = IrisModelSelector.requiereTiempoReal(pregunta)
         if (tiempoReal && !Conectividad.hayInternet(appContext)) {
             return ResultadoComando(
@@ -149,14 +158,17 @@ class ProcesadorComandos(context: Context) {
                 "Para darte datos actuales (noticias, resultados, precios…) necesito conexión a internet."
             )
         }
-        // Solo las tareas LIGERAS van primero al modelo local; las preguntas de datos o
-        // conocimiento van a Gemini porque el modelo pequeño inventa respuestas.
+
         val usarLocalPrimero = modeloLocal.disponible() &&
             seleccion.categoria == CategoriaTarea.LIGERA && !tiempoReal
 
         if (usarLocalPrimero) {
-            modeloLocal.generar(INSTRUCCION_LOCAL, pregunta)
-                .onSuccess { return ResultadoComando(true, it) }
+            val instruccionConMemoria = INSTRUCCION_LOCAL + memoria.construirContextoUsuario(pregunta)
+            modeloLocal.generar(instruccionConMemoria, pregunta)
+                .onSuccess {
+                    ultimoContenidoGenerado = it
+                    return ResultadoComando(true, it)
+                }
         }
         return consultarIris(
             pregunta,
@@ -165,11 +177,6 @@ class ProcesadorComandos(context: Context) {
         )
     }
 
-    /**
-     * Resume o analiza un archivo de texto adjunto. Hasta [PoliticaArchivos.MAX_CARACTERES_LOCAL]
-     * caracteres lo hace el modelo del teléfono; hasta [PoliticaArchivos.MAX_CARACTERES_NUBE],
-     * Gemini; más que eso se rechaza.
-     */
     suspend fun resumirArchivo(
         nombre: String,
         lectura: LecturaArchivo,
@@ -193,8 +200,12 @@ class ProcesadorComandos(context: Context) {
 
         val cabeEnLocal = contenido.length <= PoliticaArchivos.MAX_CARACTERES_LOCAL && modeloLocal.disponible()
         if (cabeEnLocal) {
-            modeloLocal.generar(INSTRUCCION_LOCAL, peticion)
-                .onSuccess { return ResultadoComando(true, it) }
+            val instruccionConMemoria = INSTRUCCION_LOCAL + memoria.construirContextoUsuario(indicacion)
+            modeloLocal.generar(instruccionConMemoria, peticion)
+                .onSuccess {
+                    ultimoContenidoGenerado = it
+                    return ResultadoComando(true, it)
+                }
         }
         return consultarIris(peticion, IrisModelSelector.MODELO_LIGERO, intentarLocalSiFalla = !cabeEnLocal)
     }
@@ -212,7 +223,9 @@ class ProcesadorComandos(context: Context) {
             if (datos == null) {
                 ResultadoComando(false, "No encontré una ciudad llamada «$ciudad».")
             } else {
-                ResultadoComando(true, ClimaTexto.resumen(datos))
+                val resumen = ClimaTexto.resumen(datos)
+                ultimoContenidoGenerado = resumen
+                ResultadoComando(true, resumen)
             }
         } catch (e: CancellationException) {
             throw e
@@ -228,8 +241,12 @@ class ProcesadorComandos(context: Context) {
     ): ResultadoComando {
         if (!Conectividad.hayInternet(appContext)) {
             if (intentarLocalSiFalla && modeloLocal.disponible()) {
-                modeloLocal.generar(INSTRUCCION_LOCAL, pregunta)
-                    .onSuccess { return ResultadoComando(true, AVISO_SIN_NUBE + it) }
+                val instruccionConMemoria = INSTRUCCION_LOCAL + memoria.construirContextoUsuario(pregunta)
+                modeloLocal.generar(instruccionConMemoria, pregunta)
+                    .onSuccess {
+                        ultimoContenidoGenerado = it
+                        return ResultadoComando(true, AVISO_SIN_NUBE + it)
+                    }
             }
             return ResultadoComando(false, "Ahora mismo no tengo conexión a internet.")
         }
@@ -237,19 +254,24 @@ class ProcesadorComandos(context: Context) {
         val elegido = modelo ?: IrisModelSelector.seleccionar(pregunta).modelo
 
         return gemini.preguntar(pregunta, elegido).fold(
-            onSuccess = { ResultadoComando(true, it) },
+            onSuccess = {
+                ultimoContenidoGenerado = it
+                ResultadoComando(true, it)
+            },
             onFailure = { errorNube ->
                 if (intentarLocalSiFalla && modeloLocal.disponible()) {
-                    modeloLocal.generar(INSTRUCCION_LOCAL, pregunta)
-                        .onSuccess { return ResultadoComando(true, AVISO_SIN_NUBE + it) }
+                    val instruccionConMemoria = INSTRUCCION_LOCAL + memoria.construirContextoUsuario(pregunta)
+                    modeloLocal.generar(instruccionConMemoria, pregunta)
+                        .onSuccess {
+                            ultimoContenidoGenerado = it
+                            return ResultadoComando(true, AVISO_SIN_NUBE + it)
+                        }
                 }
                 ResultadoComando(false, mensajeAmigable(errorNube))
             }
         )
     }
 
-    // Solo en compilaciones debug (las de GitHub Actions) se añade el detalle técnico para
-    // poder diagnosticar; en una release firmada el usuario solo ve el mensaje amable.
     private fun mensajeAmigable(error: Throwable): String {
         val base = mensajeBase(error)
         if (!BuildConfig.DEBUG || error !is HttpException) return base
@@ -272,9 +294,12 @@ class ProcesadorComandos(context: Context) {
             "No pude completar la consulta. Inténtalo de nuevo."
     }
 
-    private companion object {
-        const val CONTEXTO_APPS = "app_abierta"
-        const val AVISO_SIN_NUBE =
+    companion object {
+        private const val CONTEXTO_APPS = "app_abierta"
+        private const val AVISO_SIN_NUBE =
             "No pude consultar a Gemini; esta respuesta viene de mi modelo local y puede tener errores.\n\n"
+
+        /** Última respuesta útil generada por Iris (compartida entre pantalla y servicio de voz). */
+        @Volatile var ultimoContenidoGenerado: String? = null
     }
 }
