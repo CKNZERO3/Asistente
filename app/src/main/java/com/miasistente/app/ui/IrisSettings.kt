@@ -58,6 +58,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import com.miasistente.app.memoria.Cuaderno
+import com.miasistente.app.memoria.MemoriaLocal
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @Composable
 fun IrisSettingsScreen(
@@ -640,16 +649,36 @@ data class NotebookEntry(
     val paperType: String = "Líneas"
 )
 
+/** Imagen o archivo guardado en un cuaderno. */
+data class NotebookAttachment(val uri: String, val name: String, val isImage: Boolean)
+
+private fun Cuaderno.aEntrada(): NotebookEntry = NotebookEntry(
+    id = id.toInt(),
+    title = titulo,
+    body = cuerpo,
+    date = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date(actualizado)),
+    paperType = papel
+)
+
 @Composable
 fun NotebookMockupPage(onBack: () -> Unit) {
+    val context = LocalContext.current
+    // Los cuadernos viven en la memoria local de Iris (SQLite): se conservan al cerrar la app
+    // y ahí llegan también las notas, imágenes y archivos que Iris guarda por voz o chat.
+    val memoria = remember { MemoriaLocal.get(context) }
+    val scope = rememberCoroutineScope()
     var openedNoteId by rememberSaveable { mutableStateOf<Int?>(null) }
-    var notes by remember {
-        mutableStateOf(
-            listOf(
-                NotebookEntry(1, "Notas Personales", "", "12/11/2026", paperType = "Líneas"),
-                NotebookEntry(2, "Proyecto de App", "", "13/11/2026", paperType = "Puntos")
-            )
-        )
+    var notes by remember { mutableStateOf<List<NotebookEntry>>(emptyList()) }
+    var attachments by remember { mutableStateOf<List<NotebookAttachment>>(emptyList()) }
+
+    LaunchedEffect(Unit) {
+        notes = memoria.cuadernos().map { it.aEntrada() }
+    }
+    LaunchedEffect(openedNoteId) {
+        val id = openedNoteId
+        attachments = if (id == null) emptyList() else memoria.adjuntos(id.toLong()).mapNotNull { e ->
+            e.uri?.let { NotebookAttachment(it, e.nombre ?: "archivo", e.tipo == MemoriaLocal.TIPO_IMAGEN) }
+        }
     }
 
     val p = LocalIrisPalette.current
@@ -659,10 +688,17 @@ fun NotebookMockupPage(onBack: () -> Unit) {
         NotebookDigitalPlanner(
             note = note,
             allNotes = notes,
-            onUpdate = { updated -> notes = notes.map { if (it.id == updated.id) updated else it } },
-            onDelete = { id -> 
+            attachments = attachments,
+            onUpdate = { updated ->
+                notes = notes.map { if (it.id == updated.id) updated else it }
+                scope.launch {
+                    memoria.actualizarCuaderno(updated.id.toLong(), updated.title, updated.body, updated.paperType)
+                }
+            },
+            onDelete = { id ->
                 notes = notes.filterNot { it.id == id }
-                openedNoteId = null 
+                openedNoteId = null
+                scope.launch { memoria.eliminarCuaderno(id.toLong()) }
             },
             onNavigate = { newId -> openedNoteId = newId },
             onBack = { openedNoteId = null }
@@ -707,10 +743,11 @@ fun NotebookMockupPage(onBack: () -> Unit) {
             ) {
                 Button(
                     onClick = {
-                        val nextId = (notes.maxOfOrNull { it.id } ?: 0) + 1
-                        val created = NotebookEntry(nextId, "Nuevo tema $nextId", "", "Hoy")
-                        notes = notes + created
-                        openedNoteId = nextId
+                        scope.launch {
+                            val created = memoria.crearCuaderno("Nuevo tema ${notes.size + 1}").aEntrada()
+                            notes = notes + created
+                            openedNoteId = created.id
+                        }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = p.accent)
                 ) { Text("Crear Cuaderno") }
@@ -724,6 +761,7 @@ fun NotebookMockupPage(onBack: () -> Unit) {
 fun NotebookDigitalPlanner(
     note: NotebookEntry,
     allNotes: List<NotebookEntry>,
+    attachments: List<NotebookAttachment> = emptyList(),
     onUpdate: (NotebookEntry) -> Unit,
     onDelete: (Int) -> Unit,
     onNavigate: (Int) -> Unit,
@@ -815,6 +853,19 @@ fun NotebookDigitalPlanner(
                 }
             }
 
+            // Imágenes y archivos guardados por Iris en este cuaderno
+            if (attachments.isNotEmpty()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                        .padding(horizontal = 24.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    attachments.forEach { NotebookAttachmentThumb(it) }
+                }
+            }
+
             // Cuerpo del cuaderno
             BasicTextField(
                 value = body,
@@ -883,6 +934,40 @@ fun NotebookDigitalPlanner(
     }
 }
 
+
+@Composable
+private fun NotebookAttachmentThumb(item: NotebookAttachment) {
+    val shape = RoundedCornerShape(10.dp)
+    val bitmap = if (item.isImage) rememberUriBitmap(item.uri, 240).bitmap else null
+    if (bitmap != null) {
+        Image(
+            bitmap = bitmap,
+            contentDescription = item.name,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.size(72.dp).clip(shape)
+        )
+    } else {
+        Column(
+            modifier = Modifier
+                .size(72.dp)
+                .clip(shape)
+                .background(Color(0xFFEDEBE3))
+                .border(1.dp, Color(0xFFD3D3D3), shape)
+                .padding(6.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Icon(Icons.Default.InsertDriveFile, contentDescription = null, tint = Color(0xFF555555))
+            Text(
+                item.name,
+                color = Color(0xFF333333),
+                fontSize = 9.sp,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
 
 @Composable
 fun SettingsTopBar(title: String, onBack: () -> Unit) {

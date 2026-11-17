@@ -6,6 +6,7 @@ import android.provider.Settings
 import com.miasistente.app.BuildConfig
 import com.miasistente.app.accesibilidad.IrisAccessibilityService
 import com.miasistente.app.data.Ajustes
+import com.miasistente.app.memoria.MemoriaLocal
 import kotlinx.coroutines.CancellationException
 
 class ProcesadorComandos(context: Context) {
@@ -18,6 +19,8 @@ class ProcesadorComandos(context: Context) {
     private val clima = ClimaOpenMeteo()
     private val modeloLocal = ModeloLocal(context)
     private val ajustes = Ajustes(appContext)
+    private val notas = GestorNotas(appContext)
+    private val memoria = MemoriaLocal.get(appContext)
 
     suspend fun procesar(
         texto: String,
@@ -33,14 +36,58 @@ class ProcesadorComandos(context: Context) {
         }
 
         return try {
+            ComandosMemoria.interpretar(comando)?.let { accion ->
+                responderMemoria(accion)?.let { return it }
+            }
             when (val intencion = parser.parsear(comando)) {
                 is Intencion.ConsultaIA -> responderConsulta(intencion.pregunta)
+                // Solo el contenido (sin las palabras de la orden) y en el destino pedido.
+                is Intencion.CrearNota -> notas.guardar(
+                    ExtractorNota.analizar(comando)
+                        ?: PeticionGuardar(ExtractorNota.limpiar(intencion.contenido), DestinoNota.SinEspecificar)
+                )
+                is Intencion.AbrirAplicacion -> local.ejecutar(intencion).also {
+                    // Apps favoritas: se aprende en segundo plano, sin latencia.
+                    if (it.exito) memoria.registrarHabito(CONTEXTO_APPS, normalizar(intencion.nombreApp))
+                }
                 else -> local.ejecutar(intencion)
             }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             ResultadoComando(false, "No pude completar esa acción.")
+        }
+    }
+
+    /**
+     * "Guarda esta imagen en el cuaderno Recetas" con adjuntos. Devuelve null si el texto no es
+     * una orden de guardar, y entonces la pantalla sigue con el flujo normal de adjuntos.
+     */
+    suspend fun guardarAdjuntos(texto: String, adjuntos: List<AdjuntoNota>): ResultadoComando? {
+        if (adjuntos.isEmpty()) return null
+        val comando = quitarPalabraClave(texto, ajustes.palabraClave)
+        val peticion = ExtractorNota.analizar(comando) ?: return null
+        return notas.guardar(peticion, adjuntos)
+    }
+
+    /** Memoria esencial y seguimiento de notas: todo local, sin internet. */
+    private suspend fun responderMemoria(accion: AccionMemoria): ResultadoComando? = when (accion) {
+        AccionMemoria.NoSeGuardo -> notas.reintentarUltima()
+        is AccionMemoria.Recordar -> {
+            memoria.recordar(accion.hecho)
+            ResultadoComando(true, "Entendido, lo recordaré: ${accion.hecho}")
+        }
+        is AccionMemoria.Consultar -> {
+            val encontrados = if (accion.tema == null) memoria.hechos() else memoria.buscar(accion.tema)
+            if (encontrados.isEmpty()) {
+                ResultadoComando(
+                    true,
+                    if (accion.tema == null) "Todavía no me has pedido que recuerde nada. Dime «recuerda que…»."
+                    else "No tengo nada guardado sobre «${accion.tema}»."
+                )
+            } else {
+                ResultadoComando(true, "Esto es lo que recuerdo:\n" + encontrados.joinToString("\n") { "• $it" })
+            }
         }
     }
 
@@ -94,15 +141,28 @@ class ProcesadorComandos(context: Context) {
         habilidades.peticionClima(pregunta)?.let { return consultarClima(it) }
 
         val seleccion = IrisModelSelector.seleccionar(pregunta)
+        // Noticias, resultados, precios, personajes…: solo sirve la búsqueda en internet.
+        val tiempoReal = IrisModelSelector.requiereTiempoReal(pregunta)
+        if (tiempoReal && !Conectividad.hayInternet(appContext)) {
+            return ResultadoComando(
+                false,
+                "Para darte datos actuales (noticias, resultados, precios…) necesito conexión a internet."
+            )
+        }
         // Solo las tareas LIGERAS van primero al modelo local; las preguntas de datos o
         // conocimiento van a Gemini porque el modelo pequeño inventa respuestas.
-        val usarLocalPrimero = modeloLocal.disponible() && seleccion.categoria == CategoriaTarea.LIGERA
+        val usarLocalPrimero = modeloLocal.disponible() &&
+            seleccion.categoria == CategoriaTarea.LIGERA && !tiempoReal
 
         if (usarLocalPrimero) {
             modeloLocal.generar(INSTRUCCION_LOCAL, pregunta)
                 .onSuccess { return ResultadoComando(true, it) }
         }
-        return consultarIris(pregunta, seleccion.modelo, intentarLocalSiFalla = !usarLocalPrimero)
+        return consultarIris(
+            pregunta,
+            seleccion.modelo,
+            intentarLocalSiFalla = !usarLocalPrimero && !tiempoReal
+        )
     }
 
     /**
@@ -213,6 +273,7 @@ class ProcesadorComandos(context: Context) {
     }
 
     private companion object {
+        const val CONTEXTO_APPS = "app_abierta"
         const val AVISO_SIN_NUBE =
             "No pude consultar a Gemini; esta respuesta viene de mi modelo local y puede tener errores.\n\n"
     }

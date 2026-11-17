@@ -112,6 +112,23 @@ object IrisModelSelector {
         )
     }
 
+    // Temas que cambian cada día: necesitan búsqueda en internet (grounding), nunca el modelo
+    // local. Las palabras de tiempo sueltas ("hoy") no cuentan: "traduce «hoy es lunes»" es local.
+    private val tiempoReal = Regex(
+        """\b(noticia|noticias|ultima hora|ultimas noticias|titulares|actualidad|en este momento|actualmente|""" +
+            """resultado del partido|resultados del partido|resultados de|marcador|quien gano|quien va ganando|gano el|partido de|""" +
+            """partidos de|juego de los|liga|campeonato|mundial|copa america|champions|nba|nfl|mlb|formula 1|f1|torneo|""" +
+            """clasificacion|tabla de posiciones|precio del|precio de la|precios de|cotizacion|dolar hoy|tasa del dolar|""" +
+            """bitcoin|bolsa de valores|acciones de|estreno|estrenos|lanzamiento|elecciones|presidente actual|""" +
+            """quien es el actual|quien es la actual|cuantos anos tiene|que edad tiene|esta vivo|murio|fallecio|""" +
+            """se caso|novia de|novio de|esposa de|esposo de|ultimo descubrimiento|nuevo descubrimiento|descubrieron|""" +
+            """estudio reciente|ultima version|trafico|pronostico)\b"""
+    )
+
+    /** La pregunta necesita datos actuales de internet (noticias, deportes, precios, celebridades…). */
+    fun requiereTiempoReal(pregunta: String): Boolean =
+        tiempoReal.containsMatchIn(normalizar(pregunta))
+
     fun esModeloPermitido(modelo: String): Boolean =
         modelo in modelosPermitidos
 }

@@ -15,6 +15,15 @@
            <action android:name="android.intent.action.MAIN" />
            <category android:name="android.intent.category.LAUNCHER" />
        </intent>
+       <!-- Apps de notas que aceptan texto o imágenes compartidas (Keep, Samsung Notes…) -->
+       <intent>
+           <action android:name="android.intent.action.SEND" />
+           <data android:mimeType="text/plain" />
+       </intent>
+       <intent>
+           <action android:name="android.intent.action.SEND" />
+           <data android:mimeType="image/*" />
+       </intent>
     </queries>
 
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
@@ -44,6 +53,22 @@
         <service
             android:name=".service.OverlayAvatarService"
             android:exported="false" />
+
+        <!-- Avisa qué app eligió el usuario en "Guardar nota con…" (aprendizaje de hábitos) -->
+        <receiver
+            android:name=".comandos.EleccionAppReceiver"
+            android:exported="false" />
+
+        <!-- Comparte imágenes y archivos de Iris con otras apps sin exponer rutas privadas -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.archivos"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/archivos_compartidos" />
+        </provider>
 
         <!-- NUEVO: Servicio de Accesibilidad -->
         <service

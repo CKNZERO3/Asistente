@@ -170,7 +170,7 @@ class GeminiClient(
                 "systemInstruction",
                 JSONObject().put(
                     "parts",
-                    JSONArray().put(JSONObject().put("text", INSTRUCCION))
+                    JSONArray().put(JSONObject().put("text", instruccionConFecha()))
                 )
             )
             put(
@@ -217,6 +217,20 @@ class GeminiClient(
         } finally {
             conexion.disconnect()
         }
+    }
+
+    /**
+     * La fecha y hora del teléfono, para que "hoy", "ayer" o "este año" se interpreten bien
+     * y la búsqueda en internet traiga datos de la fecha correcta.
+     */
+    private fun instruccionConFecha(): String {
+        val formato = java.text.SimpleDateFormat(
+            "EEEE d 'de' MMMM 'de' yyyy, HH:mm",
+            java.util.Locale.forLanguageTag("es")
+        )
+        return "$INSTRUCCION Fecha y hora actuales del usuario: ${formato.format(java.util.Date())}. " +
+            "Para noticias, resultados deportivos, precios, personas públicas o datos recientes, " +
+            "usa la búsqueda en internet y responde con lo más actual que encuentres."
     }
 
     private fun HttpURLConnection.inputStreamOrNull() =
