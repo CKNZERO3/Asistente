@@ -776,7 +776,7 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch { googleSignIn.signOut() }
     }
 
-    private fun manejarAccion(destination: String) {
+        private fun manejarAccion(destination: String) {
         when (destination) {
             "new_chat", "clear_messages" -> iniciarNuevaConversacion()
             "permissions" -> abrirAjustesDeLaApp()
@@ -791,9 +791,10 @@ class MainActivity : ComponentActivity() {
             "stop_speaking", "stop_external_agent_voice" -> detenerVozSilenciosamente()
             "search" -> aviso("Búsqueda próximamente")
             "gallery" -> aviso("Galería próximamente")
-            "import" -> pickMemoryFile.launch(arrayOf("text/*", "application/json",
+            "import" -> pickMemoryFile.launch(arrayOf("text/*", "application/json"))
         }
     }
+        
 
     private fun abrirAjustesDeLaApp() {
         val intent = Intent(
