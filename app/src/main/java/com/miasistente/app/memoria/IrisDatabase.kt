@@ -5,17 +5,6 @@ import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 
-/**
- * Base de datos local de Iris (SQLite del propio Android, sin dependencias extra).
- *
- * - cuadernos / entradas: Iris Notebook (texto, imágenes y archivos).
- * - memoria: hechos y preferencias del usuario.
- * - habitos: pesos de aprendizaje progresivo.
- * - entradas_fts / memoria_fts: índices de búsqueda de texto completo (FTS4).
- *
- * Los índices FTS guardan el texto ya normalizado (minúsculas, sin acentos), así la búsqueda
- * no depende del tokenizador que traiga cada versión de Android.
- */
 internal class IrisDatabase(context: Context) :
     SQLiteOpenHelper(context.applicationContext, NOMBRE, null, VERSION) {
 
@@ -25,7 +14,6 @@ internal class IrisDatabase(context: Context) :
 
     override fun onCreate(db: SQLiteDatabase) {
         ESQUEMA.forEach(db::execSQL)
-        // Los dos cuadernos que ya mostraba la pantalla de Iris Notebook.
         val ahora = System.currentTimeMillis()
         listOf("Notas Personales" to "Líneas", "Proyecto de App" to "Puntos").forEach { (titulo, papel) ->
             db.insert(
@@ -36,6 +24,9 @@ internal class IrisDatabase(context: Context) :
                     put("titulo_norm", ClasificadorCuadernos.normalizarTexto(titulo))
                     put("cuerpo", "")
                     put("papel", papel)
+                    put("fondo", "Ninguno")
+                    put("fijado", 0)
+                    put("bloqueado", 0)
                     put("creado", ahora)
                     put("actualizado", ahora)
                 }
@@ -44,13 +35,16 @@ internal class IrisDatabase(context: Context) :
     }
 
     override fun onUpgrade(db: SQLiteDatabase, anterior: Int, nueva: Int) {
-        // Versión 1: aún no hay migraciones. Cada versión futura añadirá aquí sus pasos
-        // sin borrar datos del usuario.
+        if (anterior < 2) {
+            runCatching { db.execSQL("ALTER TABLE cuadernos ADD COLUMN fondo TEXT NOT NULL DEFAULT 'Ninguno'") }
+            runCatching { db.execSQL("ALTER TABLE cuadernos ADD COLUMN fijado INTEGER NOT NULL DEFAULT 0") }
+            runCatching { db.execSQL("ALTER TABLE cuadernos ADD COLUMN bloqueado INTEGER NOT NULL DEFAULT 0") }
+        }
     }
 
     companion object {
         const val NOMBRE = "iris_memoria.db"
-        const val VERSION = 1
+        const val VERSION = 2
 
         val ESQUEMA = listOf(
             """CREATE TABLE cuadernos (
@@ -59,6 +53,9 @@ internal class IrisDatabase(context: Context) :
                 titulo_norm TEXT NOT NULL,
                 cuerpo TEXT NOT NULL DEFAULT '',
                 papel TEXT NOT NULL DEFAULT 'Líneas',
+                fondo TEXT NOT NULL DEFAULT 'Ninguno',
+                fijado INTEGER NOT NULL DEFAULT 0,
+                bloqueado INTEGER NOT NULL DEFAULT 0,
                 creado INTEGER NOT NULL,
                 actualizado INTEGER NOT NULL
             )""",
