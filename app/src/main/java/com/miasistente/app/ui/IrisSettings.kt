@@ -1,6 +1,13 @@
 package com.miasistente.app.ui
 
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.provider.OpenableColumns
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
@@ -13,20 +20,17 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.safeDrawing
-import androidx.compose.foundation.layout.systemBars
-import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.ui.draw.drawBehind
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
@@ -44,36 +48,35 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import kotlinx.coroutines.launch
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.foundation.Image
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.core.content.FileProvider
+import com.miasistente.app.memoria.ClasificadorCuadernos
 import com.miasistente.app.memoria.Cuaderno
 import com.miasistente.app.memoria.MemoriaLocal
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import android.net.Uri
-import android.provider.OpenableColumns
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.ui.text.input.TextFieldValue
-import com.miasistente.app.memoria.ClasificadorCuadernos
-import kotlinx.coroutines.delay
 
 @Composable
 fun IrisSettingsScreen(
@@ -88,6 +91,14 @@ fun IrisSettingsScreen(
     initialPage: String = "main"
 ) {
     var currentPage by rememberSaveable { mutableStateOf(initialPage) }
+    var activeModalAction by rememberSaveable { mutableStateOf<String?>(null) }
+
+    val handleAction: (String) -> Unit = { action ->
+        when (action) {
+            "account", "limits", "intelligence", "skills" -> activeModalAction = action
+            else -> onAction(action)
+        }
+    }
 
     BackHandler(enabled = currentPage != "main") {
         currentPage = "main"
@@ -95,6 +106,9 @@ fun IrisSettingsScreen(
 
     AnimatedContent(
         targetState = currentPage,
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background),
         transitionSpec = {
             if (targetState != "main") {
                 (slideInHorizontally(tween(220)) { it } + fadeIn(tween(180)))
@@ -113,13 +127,13 @@ fun IrisSettingsScreen(
                 avatarEnabled = avatarEnabled,
                 onAvatarChanged = onAvatarChanged,
                 onBack = onBack,
-                onAction = onAction,
+                onAction = handleAction,
                 onNavigate = { currentPage = it }
             )
             "theme" -> ThemeSubmenuPage(
                 darkTheme = darkTheme,
                 amoledMode = amoledMode,
-                onDarkThemeChange = onDarkThemeChange,    
+                onDarkThemeChange = onDarkThemeChange,
                 onAmoledChange = onAmoledChange,
                 onBack = { currentPage = "main" }
             )
@@ -136,6 +150,26 @@ fun IrisSettingsScreen(
                 }
             )
         }
+    }
+
+    activeModalAction?.let { actionKey ->
+        val (dialogTitle, dialogBody) = when (actionKey) {
+            "account" -> "Administrar cuenta" to "SesiÃ³n local activa en Iris. PrÃ³ximamente sincronizaciÃ³n con Google."
+            "limits" -> "LÃ­mites de uso" to "Modo hÃ­brido: consultas ligeras en Gemma 3 1B local y complejas en la nube."
+            "intelligence" -> "Inteligencia personalizada" to "Iris aprende tus cuadernos y preferencias locales de forma progresiva."
+            "skills" -> "Habilidades" to "Cuadernos inteligentes, memoria offline, visiÃ³n y comandos de voz activos."
+            else -> "Iris" to "FunciÃ³n en desarrollo."
+        }
+        AlertDialog(
+            onDismissRequest = { activeModalAction = null },
+            title = { Text(dialogTitle) },
+            text = { Text(dialogBody) },
+            confirmButton = {
+                TextButton(onClick = { activeModalAction = null }) {
+                    Text("Entendido")
+                }
+            }
+        )
     }
 }
 
@@ -158,7 +192,7 @@ private fun MainSettingsContent(
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {}
             .windowInsetsPadding(WindowInsets.systemBars)
     ) {
-        SettingsTopBar("Configuración", onBack)
+        SettingsTopBar("ConfiguraciÃ³n", onBack)
 
         Column(
             modifier = Modifier
@@ -171,7 +205,7 @@ private fun MainSettingsContent(
             }
             Spacer(modifier = Modifier.height(12.dp))
             SettingsCard {
-                SettingsItem("Límites de uso", null, Icons.Outlined.Schedule) { onAction("limits") }
+                SettingsItem("LÃ­mites de uso", null, Icons.Outlined.Schedule) { onAction("limits") }
             }
 
             SettingsSection("Preferencias")
@@ -207,7 +241,7 @@ private fun MainSettingsContent(
                     Spacer(Modifier.width(16.dp))
                     Column(Modifier.weight(1f)) {
                         Text("Avatar 3D", color = p.text, fontSize = 16.sp)
-                        Text("Animación del sistema", color = p.muted, fontSize = 13.sp)
+                        Text("AnimaciÃ³n del sistema", color = p.muted, fontSize = 13.sp)
                     }
                     Switch(
                         checked = avatarEnabled,
@@ -325,17 +359,7 @@ fun DraggableThemeSwitch(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null
             ) {
-                val targetDark = !isDark
-                scope.launch {
-                    progress.animateTo(
-                        targetValue = if (targetDark) 1f else 0f,
-                        animationSpec = spring(
-                            dampingRatio = Spring.DampingRatioNoBouncy,
-                            stiffness = Spring.StiffnessLow
-                        )
-                    )
-                    onToggle(targetDark)
-                }
+                onToggle(!isDark)
             }
             .padding(2.dp),
         contentAlignment = Alignment.CenterStart
@@ -369,9 +393,24 @@ fun ThemeSubmenuPage(
     onBack: () -> Unit
 ) {
     val p = LocalIrisPalette.current
+    val context = LocalContext.current
     val systemIsDark = isSystemInDarkTheme()
-    var followSystem by rememberSaveable { mutableStateOf(false) }
-    var selectedWallpaper by rememberSaveable { mutableStateOf(0) }
+    val prefs = remember {
+        context.getSharedPreferences("iris_settings_prefs", Context.MODE_PRIVATE)
+    }
+    var followSystem by rememberSaveable {
+        mutableStateOf(prefs.getBoolean("follow_system_theme", false))
+    }
+    var selectedWallpaper by rememberSaveable {
+        mutableStateOf(prefs.getInt("chat_wallpaper_index", 0))
+    }
+
+    LaunchedEffect(followSystem, selectedWallpaper) {
+        prefs.edit()
+            .putBoolean("follow_system_theme", followSystem)
+            .putInt("chat_wallpaper_index", selectedWallpaper)
+            .apply()
+    }
 
     LaunchedEffect(followSystem, systemIsDark) {
         if (followSystem && darkTheme != systemIsDark) {
@@ -434,7 +473,7 @@ fun ThemeSubmenuPage(
                             Spacer(Modifier.width(16.dp))
                             Column(Modifier.weight(1f)) {
                                 Text("Fondo Negro AMOLED", color = p.text, fontSize = 16.sp)
-                                Text("Ahorra batería con negros puros", color = p.muted, fontSize = 13.sp)
+                                Text("Ahorra baterÃ­a con negros puros", color = p.muted, fontSize = 13.sp)
                             }
                             Switch(
                                 checked = amoledMode,
@@ -491,7 +530,7 @@ fun ThemeSubmenuPage(
                 }
             }
 
-            SettingsSection("Fondos clásicos del chat")
+            SettingsSection("Fondos clÃ¡sicos del chat")
             val wallpapers = listOf(
                 "Animado (Por defecto)" to Color(0xFF080C21),
                 "Nebulosa" to Color(0xFF17112C),
@@ -550,35 +589,63 @@ fun ThemeSubmenuPage(
 
 @Composable
 fun NotificationsPage(onBack: () -> Unit) {
-    val p = LocalIrisPalette.current
+    val context = LocalContext.current
+    val prefs = remember {
+        context.getSharedPreferences("iris_settings_prefs", Context.MODE_PRIVATE)
+    }
+    var notifResponses by rememberSaveable { mutableStateOf(prefs.getBoolean("notif_responses", true)) }
+    var notifReminders by rememberSaveable { mutableStateOf(prefs.getBoolean("notif_reminders", true)) }
+    var notifVoiceWake by rememberSaveable { mutableStateOf(prefs.getBoolean("notif_voice_wake", true)) }
+    var notifSmartSuggestions by rememberSaveable { mutableStateOf(prefs.getBoolean("notif_smart_suggestions", false)) }
+
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).windowInsetsPadding(WindowInsets.systemBars)) {
         SettingsTopBar("Notificaciones", onBack)
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp)) {
             SettingsCard {
-                SettingsToggleItem("Respuestas de Iris", true)
+                SettingsToggleItem("Respuestas de Iris", notifResponses) { notifResponses = it }
                 SettingsDivider()
-                SettingsToggleItem("Recordatorios y tareas", true)
+                SettingsToggleItem("Recordatorios y tareas", notifReminders) { notifReminders = it }
                 SettingsDivider()
-                SettingsToggleItem("Avisos de activación por voz", true)
+                SettingsToggleItem("Avisos de activaciÃ³n por voz", notifVoiceWake) { notifVoiceWake = it }
                 SettingsDivider()
-                SettingsToggleItem("Sugerencias inteligentes", false)
+                SettingsToggleItem("Sugerencias inteligentes", notifSmartSuggestions) { notifSmartSuggestions = it }
             }
         }
-        SettingsSaveButton("Listo", onBack)
+        SettingsSaveButton("Listo") {
+            prefs.edit()
+                .putBoolean("notif_responses", notifResponses)
+                .putBoolean("notif_reminders", notifReminders)
+                .putBoolean("notif_voice_wake", notifVoiceWake)
+                .putBoolean("notif_smart_suggestions", notifSmartSuggestions)
+                .apply()
+            onBack()
+        }
     }
 }
 
 @Composable
 fun VoicePage(onImportVoice: () -> Unit, onBack: () -> Unit) {
-    val p = LocalIrisPalette.current
-    var selectedVoice by rememberSaveable { mutableStateOf(0) }
+    val context = LocalContext.current
+    val prefs = remember {
+        context.getSharedPreferences("iris_settings_prefs", Context.MODE_PRIVATE)
+    }
+    var selectedVoice by rememberSaveable {
+        mutableStateOf(prefs.getInt("voice_selected_index", 0))
+    }
     val voices = listOf(
         "Nova" to "Clara y natural",
-        "Lyra" to "Cálida y cercana",
+        "Lyra" to "CÃ¡lida y cercana",
         "Orion" to "Profunda y serena",
-        "Vega" to "Ágil y expresiva",
+        "Vega" to "Ãgil y expresiva",
         "Echo" to "Neutra y precisa"
     )
+
+    LaunchedEffect(selectedVoice) {
+        prefs.edit()
+            .putInt("voice_selected_index", selectedVoice)
+            .putString("voice_selected_name", voices.getOrNull(selectedVoice)?.first ?: "Nova")
+            .apply()
+    }
 
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).windowInsetsPadding(WindowInsets.systemBars)) {
         SettingsTopBar("Voz", onBack)
@@ -601,7 +668,14 @@ fun VoicePage(onImportVoice: () -> Unit, onBack: () -> Unit) {
 @Composable
 fun MultimediaPage(onBack: () -> Unit) {
     val p = LocalIrisPalette.current
-    var audioQuality by rememberSaveable { mutableStateOf(0.8f) }
+    val context = LocalContext.current
+    val prefs = remember {
+        context.getSharedPreferences("iris_settings_prefs", Context.MODE_PRIVATE)
+    }
+    var audioQuality by rememberSaveable { mutableStateOf(prefs.getFloat("media_audio_quality", 0.8f)) }
+    var autoPlayMedia by rememberSaveable { mutableStateOf(prefs.getBoolean("media_autoplay", true)) }
+    var saveGeneratedImages by rememberSaveable { mutableStateOf(prefs.getBoolean("media_save_generated", true)) }
+
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).windowInsetsPadding(WindowInsets.systemBars)) {
         SettingsTopBar("Contenido multimedia", onBack)
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp)) {
@@ -618,33 +692,53 @@ fun MultimediaPage(onBack: () -> Unit) {
                     )
                 }
                 SettingsDivider()
-                SettingsToggleItem("Reproducción automática", true)
+                SettingsToggleItem("ReproducciÃ³n automÃ¡tica", autoPlayMedia) { autoPlayMedia = it }
                 SettingsDivider()
-                SettingsToggleItem("Guardar imágenes generadas", true)
+                SettingsToggleItem("Guardar imÃ¡genes generadas", saveGeneratedImages) { saveGeneratedImages = it }
             }
         }
-        SettingsSaveButton("Listo", onBack)
+        SettingsSaveButton("Listo") {
+            prefs.edit()
+                .putFloat("media_audio_quality", audioQuality)
+                .putBoolean("media_autoplay", autoPlayMedia)
+                .putBoolean("media_save_generated", saveGeneratedImages)
+                .apply()
+            onBack()
+        }
     }
 }
 
 @Composable
 fun DevicesPage(onBack: () -> Unit) {
-    val p = LocalIrisPalette.current
+    val context = LocalContext.current
+    val prefs = remember {
+        context.getSharedPreferences("iris_settings_prefs", Context.MODE_PRIVATE)
+    }
+    var lockscreenVoice by rememberSaveable { mutableStateOf(prefs.getBoolean("device_lockscreen_voice", true)) }
+    var autoBluetooth by rememberSaveable { mutableStateOf(prefs.getBoolean("device_auto_bluetooth", true)) }
+    var syncAccessories by rememberSaveable { mutableStateOf(prefs.getBoolean("device_sync_accessories", false)) }
+
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).windowInsetsPadding(WindowInsets.systemBars)) {
         SettingsTopBar("Controles de dispositivos", onBack)
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp)) {
             SettingsCard {
-                SettingsToggleItem("Control por voz en pantalla bloqueada", true)
+                SettingsToggleItem("Control por voz en pantalla bloqueada", lockscreenVoice) { lockscreenVoice = it }
                 SettingsDivider()
-                SettingsToggleItem("Audio Bluetooth automático", true)
+                SettingsToggleItem("Audio Bluetooth automÃ¡tico", autoBluetooth) { autoBluetooth = it }
                 SettingsDivider()
-                SettingsToggleItem("Sincronizar con accesorios", false)
+                SettingsToggleItem("Sincronizar con accesorios", syncAccessories) { syncAccessories = it }
             }
         }
-        SettingsSaveButton("Listo", onBack)
+        SettingsSaveButton("Listo") {
+            prefs.edit()
+                .putBoolean("device_lockscreen_voice", lockscreenVoice)
+                .putBoolean("device_auto_bluetooth", autoBluetooth)
+                .putBoolean("device_sync_accessories", syncAccessories)
+                .apply()
+            onBack()
+        }
     }
 }
-
 
 data class NotebookEntry(
     val id: Int,
@@ -653,10 +747,9 @@ data class NotebookEntry(
     val date: String,
     val pinned: Boolean = false,
     val locked: Boolean = false,
-    val paperType: String = "Líneas"
+    val paperType: String = "LÃ­neas"
 )
 
-/** Imagen o archivo guardado en un cuaderno. */
 data class NotebookAttachment(
     val id: Long = 0L,
     val uri: String,
@@ -754,7 +847,6 @@ fun NotebookMockupPage(onBack: () -> Unit) {
                 }
             },
             onRemoveAttachment = { attachmentId ->
-                val targetId = note.id.toLong()
                 scope.launch {
                     memoria.eliminarEntrada(attachmentId)
                     attachments = attachments.filterNot { it.id == attachmentId }
@@ -813,10 +905,36 @@ fun NotebookMockupPage(onBack: () -> Unit) {
                             )
                             Spacer(Modifier.height(8.dp))
                             Text(
-                                text = "Última mod: ${note.date}",
+                                text = "Ãšltima mod: ${note.date}",
                                 fontSize = 10.sp,
                                 color = Color.DarkGray
                             )
+                        }
+
+                        if (note.pinned || note.locked) {
+                            Row(
+                                modifier = Modifier
+                                    .align(Alignment.BottomEnd)
+                                    .padding(8.dp),
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                if (note.pinned) {
+                                    Icon(
+                                        Icons.Default.PushPin,
+                                        contentDescription = "Fijado",
+                                        tint = Color(0xFF333333),
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                }
+                                if (note.locked) {
+                                    Icon(
+                                        Icons.Default.Lock,
+                                        contentDescription = "Bloqueado",
+                                        tint = Color(0xFF333333),
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -847,7 +965,7 @@ fun NotebookMockupPage(onBack: () -> Unit) {
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        "Escribe un nombre o describe el tema (si lo dejas vacío, se creará uno automático).",
+                        "Escribe un nombre o describe el tema (si lo dejas vacÃ­o, se crearÃ¡ uno automÃ¡tico).",
                         fontSize = 13.sp,
                         color = p.muted
                     )
@@ -898,7 +1016,7 @@ fun NotebookMockupPage(onBack: () -> Unit) {
     }
 }
 
-private fun obtenerNombreArchivo(context: android.content.Context, uri: Uri): String {
+private fun obtenerNombreArchivo(context: Context, uri: Uri): String {
     if (uri.scheme == "content") {
         runCatching {
             context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
@@ -928,12 +1046,12 @@ fun NotebookDigitalPlanner(
     onNavigate: (Int) -> Unit,
     onBack: () -> Unit
 ) {
-    // Estado local desacoplado de SQLite con TextFieldValue para evitar pérdida de caracteres
-    // durante la composición rápida del teclado IME.
     var titleField by remember(note.id) { mutableStateOf(TextFieldValue(note.title)) }
     var bodyField by remember(note.id) { mutableStateOf(TextFieldValue(note.body)) }
     var paperType by remember(note.id) { mutableStateOf(note.paperType) }
     var showMenu by remember { mutableStateOf(false) }
+    var previewAttachment by remember { mutableStateOf<NotebookAttachment?>(null) }
+    val context = LocalContext.current
     val p = LocalIrisPalette.current
 
     val currentOnUpdate by rememberUpdatedState(onUpdate)
@@ -955,7 +1073,17 @@ fun NotebookDigitalPlanner(
         }
     }
 
-    // Auto-guardado con debounce (450 ms) sin provocar recomposiciones por tecla
+    DisposableEffect(note.id) {
+        onDispose {
+            flushChanges()
+        }
+    }
+
+    BackHandler {
+        flushChanges()
+        onBack()
+    }
+
     LaunchedEffect(note.id, titleField.text, bodyField.text, paperType) {
         delay(450L)
         flushChanges()
@@ -983,7 +1111,6 @@ fun NotebookDigitalPlanner(
             .imePadding()
             .padding(top = 8.dp, bottom = 8.dp, start = 12.dp, end = 4.dp)
     ) {
-        // Área central de papel
         Column(
             modifier = Modifier
                 .weight(1f)
@@ -993,27 +1120,27 @@ fun NotebookDigitalPlanner(
                 .drawBehind {
                     val lineColor = Color(0xFFD3D3D3)
                     when (paperType) {
-                        "Líneas" -> {
+                        "LÃ­neas" -> {
                             val spacing = 32.dp.toPx()
                             var y = 100.dp.toPx()
                             while (y < size.height) {
                                 drawLine(
                                     color = lineColor,
-                                    start = androidx.compose.ui.geometry.Offset(0f, y),
-                                    end = androidx.compose.ui.geometry.Offset(size.width, y),
+                                    start = Offset(0f, y),
+                                    end = Offset(size.width, y),
                                     strokeWidth = 2f
                                 )
                                 y += spacing
                             }
                         }
-                        "Cuadrícula" -> {
+                        "CuadrÃ­cula" -> {
                             val spacing = 24.dp.toPx()
                             var y = spacing
                             while (y < size.height) {
                                 drawLine(
                                     color = lineColor,
-                                    start = androidx.compose.ui.geometry.Offset(0f, y),
-                                    end = androidx.compose.ui.geometry.Offset(size.width, y),
+                                    start = Offset(0f, y),
+                                    end = Offset(size.width, y),
                                     strokeWidth = 2f
                                 )
                                 y += spacing
@@ -1022,8 +1149,8 @@ fun NotebookDigitalPlanner(
                             while (x < size.width) {
                                 drawLine(
                                     color = lineColor,
-                                    start = androidx.compose.ui.geometry.Offset(x, 0f),
-                                    end = androidx.compose.ui.geometry.Offset(x, size.height),
+                                    start = Offset(x, 0f),
+                                    end = Offset(x, size.height),
                                     strokeWidth = 2f
                                 )
                                 x += spacing
@@ -1038,7 +1165,7 @@ fun NotebookDigitalPlanner(
                                     drawCircle(
                                         color = lineColor,
                                         radius = 2f,
-                                        center = androidx.compose.ui.geometry.Offset(x, y)
+                                        center = Offset(x, y)
                                     )
                                     x += spacing
                                 }
@@ -1048,7 +1175,6 @@ fun NotebookDigitalPlanner(
                     }
                 }
         ) {
-            // Cabecera interna del cuaderno
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1087,11 +1213,10 @@ fun NotebookDigitalPlanner(
                     )
                 }
                 IconButton(onClick = { showMenu = !showMenu }) {
-                    Icon(Icons.Default.MoreVert, contentDescription = "Menú", tint = Color.Black)
+                    Icon(Icons.Default.MoreVert, contentDescription = "MenÃº", tint = Color.Black)
                 }
             }
 
-            // Imágenes y archivos guardados en este cuaderno
             if (attachments.isNotEmpty()) {
                 Row(
                     modifier = Modifier
@@ -1107,13 +1232,13 @@ fun NotebookDigitalPlanner(
                                 { onRemoveAttachment(item.id) }
                             } else {
                                 null
-                            }
+                            },
+                            onClick = { previewAttachment = item }
                         )
                     }
                 }
             }
 
-            // Cuerpo del cuaderno
             BasicTextField(
                 value = bodyField,
                 onValueChange = { bodyField = it },
@@ -1127,7 +1252,7 @@ fun NotebookDigitalPlanner(
                     Box(modifier = Modifier.fillMaxSize()) {
                         if (bodyField.text.isEmpty()) {
                             Text(
-                                text = "Escribe aquí o adjunta imágenes y archivos...",
+                                text = "Escribe aquÃ­ o adjunta imÃ¡genes y archivos...",
                                 color = Color(0xFF999999),
                                 fontSize = 16.sp
                             )
@@ -1141,7 +1266,6 @@ fun NotebookDigitalPlanner(
             )
         }
 
-        // Solapas Laterales (Tabs) con indicador claro de pestaña activa
         Column(
             modifier = Modifier
                 .width(42.dp)
@@ -1199,6 +1323,84 @@ fun NotebookDigitalPlanner(
         }
     }
 
+    previewAttachment?.let { selected ->
+        Dialog(
+            onDismissRequest = { previewAttachment = null },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(Color(0xEE000000), Color(0xFF111111)),
+                            start = Offset.Zero,
+                            end = Offset(0f, 1200f)
+                        )
+                    )
+                    .padding(16.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                val fullBitmap = if (selected.isImage) rememberUriBitmap(selected.uri, 1280).bitmap else null
+                if (fullBitmap != null) {
+                    Image(
+                        bitmap = fullBitmap,
+                        contentDescription = selected.name,
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            Icons.Default.InsertDriveFile,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(64.dp)
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        Text(selected.name, color = Color.White, fontSize = 16.sp)
+                        Spacer(Modifier.height(16.dp))
+                        Button(
+                            onClick = {
+                                runCatching {
+                                    val parsed = Uri.parse(selected.uri)
+                                    val shareUri = if (parsed.scheme == "file" && parsed.path != null) {
+                                        FileProvider.getUriForFile(
+                                            context,
+                                            "${context.packageName}.fileprovider",
+                                            File(parsed.path!!)
+                                        )
+                                    } else {
+                                        parsed
+                                    }
+                                    val viewIntent = Intent(Intent.ACTION_VIEW).apply {
+                                        setDataAndType(shareUri, context.contentResolver.getType(shareUri) ?: "*/*")
+                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                    }
+                                    context.startActivity(Intent.createChooser(viewIntent, "Abrir archivo"))
+                                }.onFailure {
+                                    Toast.makeText(
+                                        context,
+                                        "No hay una app disponible para abrir este archivo",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                }
+                            }
+                        ) {
+                            Text("Abrir con app externa")
+                        }
+                    }
+                }
+                IconButton(
+                    onClick = { previewAttachment = null },
+                    modifier = Modifier.align(Alignment.TopEnd)
+                ) {
+                    Icon(Icons.Default.Close, contentDescription = "Cerrar vista previa", tint = Color.White)
+                }
+            }
+        }
+    }
+
     if (showMenu) {
         ModalBottomSheet(
             onDismissRequest = { showMenu = false },
@@ -1212,7 +1414,7 @@ fun NotebookDigitalPlanner(
                         .padding(vertical = 12.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    listOf("Lisa", "Líneas", "Cuadrícula", "Puntos").forEach { type ->
+                    listOf("Lisa", "LÃ­neas", "CuadrÃ­cula", "Puntos").forEach { type ->
                         val selected = paperType == type
                         Box(
                             modifier = Modifier
@@ -1266,11 +1468,16 @@ fun NotebookDigitalPlanner(
 @Composable
 private fun NotebookAttachmentThumb(
     item: NotebookAttachment,
-    onRemove: (() -> Unit)? = null
+    onRemove: (() -> Unit)? = null,
+    onClick: (() -> Unit)? = null
 ) {
     val shape = RoundedCornerShape(10.dp)
     val bitmap = if (item.isImage) rememberUriBitmap(item.uri, 240).bitmap else null
-    Box(modifier = Modifier.size(76.dp)) {
+    Box(
+        modifier = Modifier
+            .size(76.dp)
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+    ) {
         if (bitmap != null) {
             Image(
                 bitmap = bitmap,
@@ -1375,7 +1582,7 @@ fun SettingsCard(content: @Composable ColumnScope.() -> Unit) {
 }
 
 @Composable
-fun SettingsItem(title: String, subtitle: String? = null, icon: androidx.compose.ui.graphics.vector.ImageVector, onClick: () -> Unit) {
+fun SettingsItem(title: String, subtitle: String? = null, icon: ImageVector, onClick: () -> Unit) {
     val p = LocalIrisPalette.current
     Row(
         modifier = Modifier
@@ -1411,6 +1618,34 @@ fun SettingsToggleItem(title: String, checked: Boolean) {
         Switch(
             checked = isChecked,
             onCheckedChange = { isChecked = it },
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = Color.White,
+                checkedTrackColor = p.accent,
+                uncheckedThumbColor = p.muted,
+                uncheckedTrackColor = Color(0xFF39304D)
+            )
+        )
+    }
+}
+
+@Composable
+fun SettingsToggleItem(
+    title: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    val p = LocalIrisPalette.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onCheckedChange(!checked) }
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(title, color = p.text, fontSize = 16.sp, modifier = Modifier.weight(1f))
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
             colors = SwitchDefaults.colors(
                 checkedThumbColor = Color.White,
                 checkedTrackColor = p.accent,
