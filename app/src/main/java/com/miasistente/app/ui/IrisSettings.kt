@@ -1328,14 +1328,14 @@ fun NotebookDigitalPlanner(
             onDismissRequest = { previewAttachment = null },
             properties = DialogProperties(usePlatformDefaultWidth = false)
         ) {
-            Box(
+                        Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(
                         Brush.verticalGradient(
                             colors = listOf(Color(0xEE000000), Color(0xFF111111)),
-                            start = Offset.Zero,
-                            end = Offset(0f, 1200f)
+                            startY = 0f,
+                            endY = 1200f
                         )
                     )
                     .padding(16.dp),
