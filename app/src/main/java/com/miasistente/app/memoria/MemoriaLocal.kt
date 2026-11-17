@@ -184,6 +184,16 @@ class MemoriaLocal private constructor(context: Context) {
         }
     }
 
+    /** Elimina un adjunto o entrada individual de un cuaderno y su entrada en FTS. */
+    suspend fun eliminarEntrada(entradaId: Long) = withContext(HILO) {
+        transaccion { w ->
+            w.execSQL("DELETE FROM entradas_fts WHERE rowid = ?", arrayOf<Any>(entradaId))
+            w.delete("entradas", "id = ?", arrayOf(entradaId.toString()))
+        }
+        cacheCuadernos = null
+    }
+
+
     /** Título y contenido reciente de cada cuaderno, para clasificar sin red. */
     suspend fun resumenes(): List<CuadernoResumen> = withContext(HILO) {
         db.readableDatabase.rawQuery(
