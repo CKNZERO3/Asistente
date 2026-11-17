@@ -142,4 +142,19 @@ object ClasificadorCuadernos {
         val titulo = originales.joinToString(" ").take(24).trim()
         return titulo.replaceFirstChar { it.titlecase() }.ifBlank { "Notas" }
     }
+        /**
+     * Convierte lo escrito al crear un cuaderno en un título limpio:
+     * - Si es un nombre corto (1-3 palabras sin verbo de orden), conserva el nombre escrito.
+     * - Si es una descripción de contexto, extrae el tema o título contextual con [tituloNuevo].
+     */
+    fun tituloDesdeEntrada(entrada: String): String {
+        val limpio = entrada.trim().take(60)
+        if (limpio.isEmpty()) return "Notas"
+        val palabras = limpio.split(Regex("""\s+""")).filter { it.isNotBlank() }
+        if (palabras.size <= 3 && !limpio.contains(':')) {
+            return limpio.replaceFirstChar { it.titlecase() }
+        }
+        return tituloNuevo(limpio)
+    }
+
 }
