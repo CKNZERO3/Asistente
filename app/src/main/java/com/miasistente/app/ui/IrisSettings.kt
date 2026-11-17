@@ -67,6 +67,13 @@ import com.miasistente.app.memoria.MemoriaLocal
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import android.net.Uri
+import android.provider.OpenableColumns
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.text.input.TextFieldValue
+import com.miasistente.app.memoria.ClasificadorCuadernos
+import kotlinx.coroutines.delay
 
 @Composable
 fun IrisSettingsScreen(
@@ -112,7 +119,7 @@ fun IrisSettingsScreen(
             "theme" -> ThemeSubmenuPage(
                 darkTheme = darkTheme,
                 amoledMode = amoledMode,
-                onDarkThemeChange = onDarkThemeChange,
+                onDarkThemeChange = onDarkThemeChange,    
                 onAmoledChange = onAmoledChange,
                 onBack = { currentPage = "main" }
             )
@@ -650,7 +657,12 @@ data class NotebookEntry(
 )
 
 /** Imagen o archivo guardado en un cuaderno. */
-data class NotebookAttachment(val uri: String, val name: String, val isImage: Boolean)
+data class NotebookAttachment(
+    val id: Long = 0L,
+    val uri: String,
+    val name: String,
+    val isImage: Boolean
+)
 
 private fun Cuaderno.aEntrada(): NotebookEntry = NotebookEntry(
     id = id.toInt(),
@@ -663,21 +675,32 @@ private fun Cuaderno.aEntrada(): NotebookEntry = NotebookEntry(
 @Composable
 fun NotebookMockupPage(onBack: () -> Unit) {
     val context = LocalContext.current
-    // Los cuadernos viven en la memoria local de Iris (SQLite): se conservan al cerrar la app
-    // y ahí llegan también las notas, imágenes y archivos que Iris guarda por voz o chat.
     val memoria = remember { MemoriaLocal.get(context) }
     val scope = rememberCoroutineScope()
     var openedNoteId by rememberSaveable { mutableStateOf<Int?>(null) }
     var notes by remember { mutableStateOf<List<NotebookEntry>>(emptyList()) }
     var attachments by remember { mutableStateOf<List<NotebookAttachment>>(emptyList()) }
+    var showCreateDialog by remember { mutableStateOf(false) }
+    var newNotebookInput by remember { mutableStateOf("") }
 
     LaunchedEffect(Unit) {
         notes = memoria.cuadernos().map { it.aEntrada() }
     }
     LaunchedEffect(openedNoteId) {
         val id = openedNoteId
-        attachments = if (id == null) emptyList() else memoria.adjuntos(id.toLong()).mapNotNull { e ->
-            e.uri?.let { NotebookAttachment(it, e.nombre ?: "archivo", e.tipo == MemoriaLocal.TIPO_IMAGEN) }
+        attachments = if (id == null) {
+            emptyList()
+        } else {
+            memoria.adjuntos(id.toLong()).mapNotNull { e ->
+                e.uri?.let {
+                    NotebookAttachment(
+                        id = e.id,
+                        uri = it,
+                        name = e.nombre ?: "archivo",
+                        isImage = e.tipo == MemoriaLocal.TIPO_IMAGEN
+                    )
+                }
+            }
         }
     }
 
@@ -692,7 +715,49 @@ fun NotebookMockupPage(onBack: () -> Unit) {
             onUpdate = { updated ->
                 notes = notes.map { if (it.id == updated.id) updated else it }
                 scope.launch {
-                    memoria.actualizarCuaderno(updated.id.toLong(), updated.title, updated.body, updated.paperType)
+                    memoria.actualizarCuaderno(
+                        updated.id.toLong(),
+                        updated.title,
+                        updated.body,
+                        updated.paperType
+                    )
+                }
+            },
+            onAddAttachments = { uris ->
+                val targetId = note.id.toLong()
+                scope.launch {
+                    uris.forEach { uri ->
+                        val mime = context.contentResolver.getType(uri)
+                        val isImg = mime?.startsWith("image/") == true
+                        val displayName = obtenerNombreArchivo(context, uri)
+                        saveUriToIrisMedia(context, uri, if (isImg) "photo" else "file")
+                        val savedUri = loadIrisMedia(context)
+                            .firstOrNull { it.name == displayName }?.uri ?: uri.toString()
+                        memoria.agregarEntrada(
+                            cuadernoId = targetId,
+                            tipo = if (isImg) MemoriaLocal.TIPO_IMAGEN else MemoriaLocal.TIPO_ARCHIVO,
+                            uri = savedUri,
+                            mime = mime,
+                            nombre = displayName
+                        )
+                    }
+                    attachments = memoria.adjuntos(targetId).mapNotNull { e ->
+                        e.uri?.let {
+                            NotebookAttachment(
+                                id = e.id,
+                                uri = it,
+                                name = e.nombre ?: "archivo",
+                                isImage = e.tipo == MemoriaLocal.TIPO_IMAGEN
+                            )
+                        }
+                    }
+                }
+            },
+            onRemoveAttachment = { attachmentId ->
+                val targetId = note.id.toLong()
+                scope.launch {
+                    memoria.eliminarEntrada(attachmentId)
+                    attachments = attachments.filterNot { it.id == attachmentId }
                 }
             },
             onDelete = { id ->
@@ -708,6 +773,7 @@ fun NotebookMockupPage(onBack: () -> Unit) {
             modifier = Modifier
                 .fillMaxSize()
                 .background(MaterialTheme.colorScheme.background)
+                .windowInsetsPadding(WindowInsets.systemBars)
         ) {
             SettingsTopBar("Mis Cuadernos", onBack)
             LazyVerticalGrid(
@@ -723,37 +789,130 @@ fun NotebookMockupPage(onBack: () -> Unit) {
                         modifier = Modifier
                             .aspectRatio(0.7f)
                             .clip(RoundedCornerShape(12.dp))
-                            .background(Color(0xFFE2E0D8)) // Tapa del cuaderno
+                            .background(Color(0xFFE2E0D8))
                             .border(1.dp, p.outline, RoundedCornerShape(12.dp))
                             .clickable { openedNoteId = note.id }
                     ) {
-                        // Lomo
-                        Box(Modifier.fillMaxHeight().width(24.dp).background(Color(0xFF333333)).align(Alignment.CenterStart))
-                        Column(modifier = Modifier.padding(start = 36.dp, top = 16.dp, end = 12.dp)) {
-                            Text(note.title, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+                        Box(
+                            Modifier
+                                .fillMaxHeight()
+                                .width(24.dp)
+                                .background(Color(0xFF333333))
+                                .align(Alignment.CenterStart)
+                        )
+                        Column(
+                            modifier = Modifier.padding(start = 36.dp, top = 16.dp, end = 12.dp)
+                        ) {
+                            Text(
+                                text = note.title,
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.Black,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
                             Spacer(Modifier.height(8.dp))
-                            Text("Última mod: ${note.date}", fontSize = 10.sp, color = Color.DarkGray)
+                            Text(
+                                text = "Última mod: ${note.date}",
+                                fontSize = 10.sp,
+                                color = Color.DarkGray
+                            )
                         }
                     }
                 }
             }
             Box(
-                modifier = Modifier.fillMaxWidth().padding(16.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Button(
                     onClick = {
-                        scope.launch {
-                            val created = memoria.crearCuaderno("Nuevo tema ${notes.size + 1}").aEntrada()
-                            notes = notes + created
-                            openedNoteId = created.id
-                        }
+                        newNotebookInput = ""
+                        showCreateDialog = true
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = p.accent)
-                ) { Text("Crear Cuaderno") }
+                ) {
+                    Text("Crear Cuaderno", color = Color.White)
+                }
             }
         }
     }
+
+    if (showCreateDialog) {
+        AlertDialog(
+            onDismissRequest = { showCreateDialog = false },
+            title = { Text("Nuevo cuaderno") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "Escribe un nombre o describe el tema (si lo dejas vacío, se creará uno automático).",
+                        fontSize = 13.sp,
+                        color = p.muted
+                    )
+                    OutlinedTextField(
+                        value = newNotebookInput,
+                        onValueChange = { newNotebookInput = it },
+                        singleLine = true,
+                        placeholder = { Text("Ej: Recetas, Trabajo, Finanzas...") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val entrada = newNotebookInput.trim()
+                        showCreateDialog = false
+                        scope.launch {
+                            val existente = if (entrada.isNotBlank()) {
+                                memoria.buscarCuadernoPorNombre(entrada)
+                            } else {
+                                null
+                            }
+                            if (existente != null) {
+                                openedNoteId = existente.id.toInt()
+                            } else {
+                                val tituloFinal = if (entrada.isBlank()) {
+                                    "Nuevo tema ${notes.size + 1}"
+                                } else {
+                                    ClasificadorCuadernos.tituloDesdeEntrada(entrada)
+                                }
+                                val created = memoria.crearCuaderno(tituloFinal).aEntrada()
+                                notes = notes + created
+                                openedNoteId = created.id
+                            }
+                        }
+                    }
+                ) {
+                    Text("Abrir / Crear")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCreateDialog = false }) {
+                    Text("Cancelar")
+                }
+            }
+        )
+    }
+}
+
+private fun obtenerNombreArchivo(context: android.content.Context, uri: Uri): String {
+    if (uri.scheme == "content") {
+        runCatching {
+            context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    if (idx >= 0) {
+                        val name = cursor.getString(idx)
+                        if (!name.isNullOrBlank()) return name
+                    }
+                }
+            }
+        }
+    }
+    return uri.lastPathSegment?.substringAfterLast('/') ?: "archivo_${System.currentTimeMillis()}"
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -763,43 +922,87 @@ fun NotebookDigitalPlanner(
     allNotes: List<NotebookEntry>,
     attachments: List<NotebookAttachment> = emptyList(),
     onUpdate: (NotebookEntry) -> Unit,
+    onAddAttachments: (List<Uri>) -> Unit = {},
+    onRemoveAttachment: (Long) -> Unit = {},
     onDelete: (Int) -> Unit,
     onNavigate: (Int) -> Unit,
     onBack: () -> Unit
 ) {
-    var title by remember(note.id) { mutableStateOf(note.title) }
-    var body by remember(note.id) { mutableStateOf(note.body) }
+    // Estado local desacoplado de SQLite con TextFieldValue para evitar pérdida de caracteres
+    // durante la composición rápida del teclado IME.
+    var titleField by remember(note.id) { mutableStateOf(TextFieldValue(note.title)) }
+    var bodyField by remember(note.id) { mutableStateOf(TextFieldValue(note.body)) }
+    var paperType by remember(note.id) { mutableStateOf(note.paperType) }
     var showMenu by remember { mutableStateOf(false) }
     val p = LocalIrisPalette.current
 
+    val currentOnUpdate by rememberUpdatedState(onUpdate)
+    val currentNote by rememberUpdatedState(note)
+
+    fun flushChanges() {
+        val cleanTitle = titleField.text.ifBlank { currentNote.title }
+        if (cleanTitle != currentNote.title ||
+            bodyField.text != currentNote.body ||
+            paperType != currentNote.paperType
+        ) {
+            currentOnUpdate(
+                currentNote.copy(
+                    title = cleanTitle,
+                    body = bodyField.text,
+                    paperType = paperType
+                )
+            )
+        }
+    }
+
+    // Auto-guardado con debounce (450 ms) sin provocar recomposiciones por tecla
+    LaunchedEffect(note.id, titleField.text, bodyField.text, paperType) {
+        delay(450L)
+        flushChanges()
+    }
+
+    val mediaPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris ->
+        if (uris.isNotEmpty()) {
+            onAddAttachments(uris)
+        }
+    }
+
     val paperColors = listOf(Color(0xFFFFFFFF), Color(0xFFF9F7E8))
-    
     val tabColors = listOf(
-        Color(0xFFB5E6D8), Color(0xFFFFD1D1), Color(0xFFE5D4ED), 
+        Color(0xFFB5E6D8), Color(0xFFFFD1D1), Color(0xFFE5D4ED),
         Color(0xFFFFF0B3), Color(0xFFD4E4FF), Color(0xFFFFCFA1)
     )
 
     Row(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFFE8E5DD)) // Fondo base del planner
-            .padding(top = 16.dp, bottom = 16.dp, start = 12.dp, end = 4.dp)
+            .background(Color(0xFFE8E5DD))
+            .windowInsetsPadding(WindowInsets.systemBars)
+            .imePadding()
+            .padding(top = 8.dp, bottom = 8.dp, start = 12.dp, end = 4.dp)
     ) {
-        // Area central de papel
+        // Área central de papel
         Column(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxHeight()
                 .clip(RoundedCornerShape(topStart = 16.dp, bottomStart = 16.dp))
-                .background(paperColors[0]) // Papel blanco/crema
+                .background(paperColors[0])
                 .drawBehind {
                     val lineColor = Color(0xFFD3D3D3)
-                    when (note.paperType) {
+                    when (paperType) {
                         "Líneas" -> {
                             val spacing = 32.dp.toPx()
                             var y = 100.dp.toPx()
                             while (y < size.height) {
-                                drawLine(color = lineColor, start = androidx.compose.ui.geometry.Offset(0f, y), end = androidx.compose.ui.geometry.Offset(size.width, y), strokeWidth = 2f)
+                                drawLine(
+                                    color = lineColor,
+                                    start = androidx.compose.ui.geometry.Offset(0f, y),
+                                    end = androidx.compose.ui.geometry.Offset(size.width, y),
+                                    strokeWidth = 2f
+                                )
                                 y += spacing
                             }
                         }
@@ -807,12 +1010,22 @@ fun NotebookDigitalPlanner(
                             val spacing = 24.dp.toPx()
                             var y = spacing
                             while (y < size.height) {
-                                drawLine(color = lineColor, start = androidx.compose.ui.geometry.Offset(0f, y), end = androidx.compose.ui.geometry.Offset(size.width, y), strokeWidth = 2f)
+                                drawLine(
+                                    color = lineColor,
+                                    start = androidx.compose.ui.geometry.Offset(0f, y),
+                                    end = androidx.compose.ui.geometry.Offset(size.width, y),
+                                    strokeWidth = 2f
+                                )
                                 y += spacing
                             }
                             var x = spacing
                             while (x < size.width) {
-                                drawLine(color = lineColor, start = androidx.compose.ui.geometry.Offset(x, 0f), end = androidx.compose.ui.geometry.Offset(x, size.height), strokeWidth = 2f)
+                                drawLine(
+                                    color = lineColor,
+                                    start = androidx.compose.ui.geometry.Offset(x, 0f),
+                                    end = androidx.compose.ui.geometry.Offset(x, size.height),
+                                    strokeWidth = 2f
+                                )
                                 x += spacing
                             }
                         }
@@ -822,7 +1035,11 @@ fun NotebookDigitalPlanner(
                             while (y < size.height) {
                                 var x = spacing
                                 while (x < size.width) {
-                                    drawCircle(color = lineColor, radius = 2f, center = androidx.compose.ui.geometry.Offset(x, y))
+                                    drawCircle(
+                                        color = lineColor,
+                                        radius = 2f,
+                                        center = androidx.compose.ui.geometry.Offset(x, y)
+                                    )
                                     x += spacing
                                 }
                                 y += spacing
@@ -833,67 +1050,150 @@ fun NotebookDigitalPlanner(
         ) {
             // Cabecera interna del cuaderno
             Row(
-                modifier = Modifier.fillMaxWidth().padding(12.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                IconButton(onClick = { 
-                    onUpdate(note.copy(title = title, body = body))
-                    onBack() 
-                }) {
+                IconButton(
+                    onClick = {
+                        flushChanges()
+                        onBack()
+                    }
+                ) {
                     Icon(Icons.Outlined.Home, contentDescription = "Inicio", tint = Color.Black)
                 }
                 BasicTextField(
-                    value = title,
-                    onValueChange = { title = it; onUpdate(note.copy(title = it, body = body)) },
-                    textStyle = TextStyle(color = Color.Black, fontSize = 24.sp, fontWeight = FontWeight.Bold),
-                    modifier = Modifier.weight(1f).padding(start = 8.dp)
+                    value = titleField,
+                    onValueChange = { titleField = it },
+                    singleLine = true,
+                    textStyle = TextStyle(
+                        color = Color.Black,
+                        fontSize = 22.sp,
+                        fontWeight = FontWeight.Bold
+                    ),
+                    cursorBrush = SolidColor(p.accent),
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(horizontal = 6.dp)
                 )
+                IconButton(
+                    onClick = { mediaPicker.launch(arrayOf("image/*", "*/*")) }
+                ) {
+                    Icon(
+                        Icons.Default.AttachFile,
+                        contentDescription = "Adjuntar imagen o archivo",
+                        tint = Color.Black
+                    )
+                }
                 IconButton(onClick = { showMenu = !showMenu }) {
-                    Icon(Icons.Default.MoreVert, "Menú", tint = Color.Black)
+                    Icon(Icons.Default.MoreVert, contentDescription = "Menú", tint = Color.Black)
                 }
             }
 
-            // Imágenes y archivos guardados por Iris en este cuaderno
+            // Imágenes y archivos guardados en este cuaderno
             if (attachments.isNotEmpty()) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .horizontalScroll(rememberScrollState())
-                        .padding(horizontal = 24.dp, vertical = 4.dp),
+                        .padding(horizontal = 20.dp, vertical = 6.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    attachments.forEach { NotebookAttachmentThumb(it) }
+                    attachments.forEach { item ->
+                        NotebookAttachmentThumb(
+                            item = item,
+                            onRemove = if (item.id > 0L) {
+                                { onRemoveAttachment(item.id) }
+                            } else {
+                                null
+                            }
+                        )
+                    }
                 }
             }
 
             // Cuerpo del cuaderno
             BasicTextField(
-                value = body,
-                onValueChange = { body = it; onUpdate(note.copy(title = title, body = it)) },
-                textStyle = TextStyle(color = Color(0xFF333333), fontSize = 18.sp, lineHeight = 28.sp),
+                value = bodyField,
+                onValueChange = { bodyField = it },
+                textStyle = TextStyle(
+                    color = Color(0xFF333333),
+                    fontSize = 18.sp,
+                    lineHeight = 28.sp
+                ),
+                cursorBrush = SolidColor(p.accent),
+                decorationBox = { innerTextField ->
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        if (bodyField.text.isEmpty()) {
+                            Text(
+                                text = "Escribe aquí o adjunta imágenes y archivos...",
+                                color = Color(0xFF999999),
+                                fontSize = 16.sp
+                            )
+                        }
+                        innerTextField()
+                    }
+                },
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(horizontal = 24.dp, vertical = 8.dp)
             )
         }
 
-        // Solapas Laterales (Tabs)
+        // Solapas Laterales (Tabs) con indicador claro de pestaña activa
         Column(
-            modifier = Modifier.width(36.dp).fillMaxHeight().padding(vertical = 32.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
+            modifier = Modifier
+                .width(42.dp)
+                .fillMaxHeight()
+                .padding(vertical = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+            horizontalAlignment = Alignment.End
         ) {
             allNotes.take(12).forEachIndexed { idx, tabNote ->
                 val isActive = tabNote.id == note.id
                 Box(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .height(if (isActive) 52.dp else 42.dp)
-                        .clip(RoundedCornerShape(topEnd = 8.dp, bottomEnd = 8.dp))
+                        .fillMaxWidth(if (isActive) 1f else 0.82f)
+                        .height(if (isActive) 56.dp else 42.dp)
+                        .clip(RoundedCornerShape(topEnd = 10.dp, bottomEnd = 10.dp))
                         .background(tabColors[idx % tabColors.size])
-                        .clickable { onNavigate(tabNote.id) },
+                        .then(
+                            if (isActive) {
+                                Modifier.border(
+                                    width = 2.dp,
+                                    color = p.accent,
+                                    shape = RoundedCornerShape(topEnd = 10.dp, bottomEnd = 10.dp)
+                                )
+                            } else {
+                                Modifier
+                            }
+                        )
+                        .clickable {
+                            if (!isActive) {
+                                flushChanges()
+                                onNavigate(tabNote.id)
+                            }
+                        },
                     contentAlignment = Alignment.Center
                 ) {
-                    Text("${idx + 1}", color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            text = "${idx + 1}",
+                            color = Color.Black,
+                            fontSize = 12.sp,
+                            fontWeight = if (isActive) FontWeight.ExtraBold else FontWeight.Medium
+                        )
+                        if (isActive) {
+                            Box(
+                                modifier = Modifier
+                                    .padding(top = 2.dp)
+                                    .size(5.dp)
+                                    .clip(CircleShape)
+                                    .background(p.accent)
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -906,23 +1206,52 @@ fun NotebookDigitalPlanner(
         ) {
             Column(Modifier.fillMaxWidth().padding(16.dp)) {
                 Text("Tipo de papel", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = p.text)
-                Row(Modifier.fillMaxWidth().padding(vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
                     listOf("Lisa", "Líneas", "Cuadrícula", "Puntos").forEach { type ->
-                        val selected = note.paperType == type
+                        val selected = paperType == type
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(8.dp))
                                 .background(if (selected) p.accent else MaterialTheme.colorScheme.background)
-                                .clickable { onUpdate(note.copy(title = title, body = body, paperType = type)) }
+                                .clickable {
+                                    paperType = type
+                                    onUpdate(
+                                        note.copy(
+                                            title = titleField.text.ifBlank { note.title },
+                                            body = bodyField.text,
+                                            paperType = type
+                                        )
+                                    )
+                                }
                                 .padding(horizontal = 12.dp, vertical = 8.dp)
                         ) {
                             Text(type, color = if (selected) Color.White else p.text, fontSize = 13.sp)
                         }
                     }
                 }
-                Spacer(Modifier.height(16.dp))
+                Spacer(Modifier.height(12.dp))
+                OutlinedButton(
+                    onClick = {
+                        showMenu = false
+                        mediaPicker.launch(arrayOf("image/*", "*/*"))
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.AttachFile, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Adjuntar imagen o archivo")
+                }
+                Spacer(Modifier.height(12.dp))
                 Button(
-                    onClick = { onDelete(note.id); showMenu = false },
+                    onClick = {
+                        onDelete(note.id)
+                        showMenu = false
+                    },
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF5252)),
                     modifier = Modifier.fillMaxWidth()
                 ) {
@@ -934,37 +1263,63 @@ fun NotebookDigitalPlanner(
     }
 }
 
-
 @Composable
-private fun NotebookAttachmentThumb(item: NotebookAttachment) {
+private fun NotebookAttachmentThumb(
+    item: NotebookAttachment,
+    onRemove: (() -> Unit)? = null
+) {
     val shape = RoundedCornerShape(10.dp)
     val bitmap = if (item.isImage) rememberUriBitmap(item.uri, 240).bitmap else null
-    if (bitmap != null) {
-        Image(
-            bitmap = bitmap,
-            contentDescription = item.name,
-            contentScale = ContentScale.Crop,
-            modifier = Modifier.size(72.dp).clip(shape)
-        )
-    } else {
-        Column(
-            modifier = Modifier
-                .size(72.dp)
-                .clip(shape)
-                .background(Color(0xFFEDEBE3))
-                .border(1.dp, Color(0xFFD3D3D3), shape)
-                .padding(6.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
-            Icon(Icons.Default.InsertDriveFile, contentDescription = null, tint = Color(0xFF555555))
-            Text(
-                item.name,
-                color = Color(0xFF333333),
-                fontSize = 9.sp,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
+    Box(modifier = Modifier.size(76.dp)) {
+        if (bitmap != null) {
+            Image(
+                bitmap = bitmap,
+                contentDescription = item.name,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clip(shape)
+                    .border(1.dp, Color(0xFFD3D3D3), shape)
             )
+        } else {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clip(shape)
+                    .background(Color(0xFFEDEBE3))
+                    .border(1.dp, Color(0xFFD3D3D3), shape)
+                    .padding(6.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Icon(Icons.Default.InsertDriveFile, contentDescription = null, tint = Color(0xFF555555))
+                Text(
+                    text = item.name,
+                    color = Color(0xFF333333),
+                    fontSize = 9.sp,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+        if (onRemove != null) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(3.dp)
+                    .size(18.dp)
+                    .clip(CircleShape)
+                    .background(Color.Black.copy(alpha = 0.65f))
+                    .clickable(onClick = onRemove),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    Icons.Default.Close,
+                    contentDescription = "Quitar adjunto",
+                    tint = Color.White,
+                    modifier = Modifier.size(12.dp)
+                )
+            }
         }
     }
 }
@@ -982,7 +1337,15 @@ fun SettingsTopBar(title: String, onBack: () -> Unit) {
             Icon(Icons.Default.ArrowBack, contentDescription = "Volver", tint = p.text)
         }
         Spacer(modifier = Modifier.width(8.dp))
-        Text(title, color = p.text, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+        Text(
+            text = title,
+            color = p.text,
+            fontSize = 20.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f)
+        )
     }
 }
 
