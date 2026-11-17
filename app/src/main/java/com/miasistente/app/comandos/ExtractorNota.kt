@@ -1,31 +1,18 @@
 package com.miasistente.app.comandos
 
-/** Adónde quiere el usuario guardar lo que dicta. */
 sealed interface DestinoNota {
-    /** Cuaderno de Iris Notebook. [nombre] null = "en mi cuaderno", sin decir cuál. */
     data class Cuaderno(val nombre: String?) : DestinoNota
-
-    /** App externa nombrada por el usuario ("Keep", "Samsung Notes"…). */
     data class App(val nombre: String) : DestinoNota
-
-    /** No dijo dónde: decide el hábito aprendido. */
     data object SinEspecificar : DestinoNota
 }
 
-/** Lo que hay que guardar (sin palabras de la orden) y dónde. */
 data class PeticionGuardar(
     val contenido: String,
     val destino: DestinoNota,
-    /** El usuario se refirió a una imagen o archivo ("guarda esta imagen…"). */
-    val mencionaAdjunto: Boolean = false
+    val mencionaAdjunto: Boolean = false,
+    val refiereRespuestaAnterior: Boolean = false
 )
 
-/**
- * Separa la orden ("puedes crear una nota y guardarla:") del contenido ("comprar pan, leche")
- * y detecta el destino ("en Keep", "en el cuaderno Recetas", "en Trabajo").
- *
- * Funciona sin red y sin IA: solo reglas, para que sea instantáneo.
- */
 object ExtractorNota {
 
     private val CORTESIA = Regex(
@@ -34,14 +21,21 @@ object ExtractorNota {
 
     private val VERBO = Regex(
         """^(?:(?:crea|crear|creame|haz|hazme|nueva|toma|tomar|anade|anadir|agrega|agregar)\s+(?:una\s+|un\s+|la\s+)?(?:nota|apunte)""" +
-            """|guardame|guardalo|guardala|guarda|guardar|anotame|anota|anotar|apuntame|apunta|apuntar|recuerdame|recordarme""" +
+            """|guardame|guardalo|guardala|guarda|guardar|anotame|anotalo|anotala|anota|anotar|apuntame|apuntalo|apunta|apuntar|recuerdame|recordarme""" +
             """|escribeme|escribe(?!\s+(?:un\s+|el\s+)?(?:correo|mensaje|email)\b)|escribir)\b"""
     )
 
-    /** Palabras de la orden que nunca forman parte del contenido. */
+    private val PRONOMBRE_ENCLITICO = Regex(
+        """^(?:guardalo|guardala|guardame|anotalo|anotala|apuntalo)\b"""
+    )
+
+    private val REFERENCIA_ANTERIOR = Regex(
+        """^(?:eso|esto|lo anterior|esa respuesta|esta respuesta|la respuesta|ese texto|este texto|todo eso|todo esto|el resultado|lo que dijiste|lo que me dijiste|lo que acabas de decir)\b"""
+    )
+
     private val RELLENO = Regex(
         """^(?:y\s+(?:la\s+|lo\s+)?(?:guarda|guardala|guardalo|guardarla|guardarlo|guardes|guardas|guardame)""" +
-            """|(?:una|la|esta|esa|mi|un)\s+(?:nota|apunte)|nota|esto|eso|tambien|rapido|rapidamente|por favor|porfa)\b"""
+            """|(?:una|la|esta|esa|mi|un)\s+(?:nota|apunte)|nota|tambien|rapido|rapidamente|por favor|porfa)\b"""
     )
 
     private val ADJUNTO = Regex(
@@ -65,10 +59,8 @@ object ExtractorNota {
 
     private val DESTINO_APP_GENERICA = Regex("""^(?:en|con)\s+(?:la\s+|mi\s+)?(?:app|aplicacion)\s+(?:de\s+)?([a-z0-9]\w*)""")
 
-    /** "en la lista": no es un destino concreto. */
     private val LISTA = Regex("""^en\s+(?:la|mi|una|las|mis)\s+listas?\b""")
 
-    /** "anota en Trabajo …": cuaderno de una palabra. */
     private val DESTINO_NOMBRE = Regex(
         """^en\s+(?!(?:la|el|un|una|mi|mis|los|las|que|cuanto|cuanta|cuando|caso|vez|serio|cuenta)\b)([a-z0-9]\w*)"""
     )
@@ -77,7 +69,6 @@ object ExtractorNota {
         """^(?::|;|-|que diga|que dice|que ponga|que pone|diciendo|con el texto|lo siguiente|lo que sigue)"""
     )
 
-    /** Separador en cualquier punto (para limitar el nombre del cuaderno). */
     private val SEPARADOR_MEDIO = Regex("""\s*(?::|;|\bque diga\b|\bque dice\b|\bque ponga\b|\bque pone\b|\bdiciendo\b|\bcon el texto\b|\blo siguiente\b)""")
 
     private val INICIO_CONTENIDO = Regex("""^(?:de que|que|de|sobre|acerca de)\s+""")
@@ -87,17 +78,16 @@ object ExtractorNota {
     )
     private val ESPACIOS = Regex("""\s+""")
 
-    /** Devuelve null si la frase no es una orden de guardar o anotar. */
     fun analizar(frase: String): PeticionGuardar? {
         val original = frase.trim()
         if (original.isEmpty()) return null
         val norm = normalizar(original)
-        // Igual que IntentParser: se corta del original para conservar acentos y mayúsculas.
         val base = if (original.length == norm.length) original else norm
 
         var i = saltarEspacios(norm, 0)
         CORTESIA.find(norm.substring(i))?.let { i = saltarEspacios(norm, i + it.value.length) }
         val verbo = VERBO.find(norm.substring(i)) ?: return null
+        var refiereAnterior = PRONOMBRE_ENCLITICO.containsMatchIn(verbo.value)
         i = saltarEspacios(norm, i + verbo.value.length)
 
         var destino: DestinoNota = DestinoNota.SinEspecificar
@@ -114,6 +104,12 @@ object ExtractorNota {
             }
             if (resto.startsWith(",")) {
                 i = saltarEspacios(norm, i + 1)
+                continue
+            }
+            val ref = REFERENCIA_ANTERIOR.find(resto)
+            if (ref != null) {
+                refiereAnterior = true
+                i = saltarEspacios(norm, i + ref.value.length)
                 continue
             }
             val relleno = RELLENO.find(resto)
@@ -172,10 +168,23 @@ object ExtractorNota {
             mencionaAdjunto = true
             contenido = ""
         }
-        return PeticionGuardar(contenido, destino, mencionaAdjunto)
+        if (REFERENCIA_ANTERIOR.matches(contenidoNorm)) {
+            refiereAnterior = true
+            contenido = ""
+        }
+        return PeticionGuardar(contenido, destino, mencionaAdjunto, refiereAnterior)
     }
 
-    /** Quita comillas, puntuación sobrante y "por favor" al final. */
+    /** Limpia saludos introductorios de una respuesta de Iris antes de guardarla en un cuaderno. */
+    fun limpiarRespuestaParaNota(respuesta: String): String {
+        var limpio = respuesta.trim()
+        limpio = limpio.replace(
+            Regex("""^(?:¡?claro!?|por supuesto|aquí tienes|aqui tienes|con gusto|listo)[,.:!\s]*""", RegexOption.IGNORE_CASE),
+            ""
+        )
+        return limpio.trim()
+    }
+
     fun limpiar(texto: String): String {
         var t = texto.trim()
         t = t.trim(' ', '.', ',', ';', ':', '!', '?', '¿', '¡', '-', '"', '“', '”', '«', '»', '\'')
@@ -184,10 +193,6 @@ object ExtractorNota {
         return t.trim(' ', '.', ',', ';', ':', '!', '?', '"', '“', '”', '«', '»', '\'').replace(ESPACIOS, " ")
     }
 
-    /**
-     * Nombre después de "en el cuaderno …". Con separador ("…Recetas: pan") el nombre es todo
-     * hasta el separador (máx. 4 palabras); sin separador, una sola palabra.
-     */
     private fun nombreCuaderno(norm: String, base: String, desde: Int): Pair<String?, Int> {
         if (desde >= norm.length) return null to desde
         val resto = norm.substring(desde)
