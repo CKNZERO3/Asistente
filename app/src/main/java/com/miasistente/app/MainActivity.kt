@@ -63,6 +63,7 @@ import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import com.miasistente.app.memoria.ImportadorMemoria
 
 class MainActivity : ComponentActivity() {
 
@@ -123,6 +124,17 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.GetContent()
     ) { uri ->
         if (uri != null) importarModeloLocal(uri)
+    }
+
+    private val pickMemoryFile = registerForActivityResult(
+    ActivityResultContracts.OpenDocument()
+    ) { uri ->
+    if (uri != null) {
+        lifecycleScope.launch {
+            val res = ImportadorMemoria.importarDesdeUri(applicationContext, uri)
+            aviso(res.mensaje)
+            }
+        }
     }
 
     private val pedirPermisosVoz = registerForActivityResult(
@@ -403,6 +415,10 @@ class MainActivity : ComponentActivity() {
             )
         )
 
+        val ultimaRespuestaAsistente = chat.messages
+        .lastOrNull { !it.fromUser && it.text.isNotBlank() }
+        ?.text
+
         thinkingConversations[targetConvId] = true
         if (targetConvId == activeConversationId) {
             chat.updateThinking(true)
@@ -481,9 +497,9 @@ class MainActivity : ComponentActivity() {
                                 } else {
                                     "$texto (imágenes adjuntas: $listaNombres)"
                                 }
-                                procesador.procesar(consultaImagen)
+                                procesador.procesar(consultaImagen, ultimoMensajeAsistente = ultimaRespuestaAsistente)
                             }
-                            else -> procesador.procesar(texto)
+                            else -> procesador.procesar(texto, ultimoMensajeAsistente = ultimaRespuestaAsistente)
                         }
                     }
                 } ?: ResultadoComando(
@@ -775,6 +791,7 @@ class MainActivity : ComponentActivity() {
             "stop_speaking", "stop_external_agent_voice" -> detenerVozSilenciosamente()
             "search" -> aviso("Búsqueda próximamente")
             "gallery" -> aviso("Galería próximamente")
+            "import" -> pickMemoryFile.launch(arrayOf("text/*", "application/json",
         }
     }
 
