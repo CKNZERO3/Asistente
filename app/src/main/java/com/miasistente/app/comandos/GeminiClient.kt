@@ -40,7 +40,7 @@ class GeminiClient(
 
     companion object {
         const val MODELO_POR_DEFECTO = IrisModelSelector.MODELO_GENERAL
-        private const val BASE = "[https://asistente.cristian-nava-ruido.workers.dev/v1beta/models](https://asistente.cristian-nava-ruido.workers.dev/v1beta/models)"
+        private const val BASE = "https://asistente.cristian-nava-ruido.workers.dev/v1beta/models"
         private const val TAG = "IrisGeminiClient"
         private val cuota = CuotaModelos()
         private const val TIMEOUT_CONEXION_MS = 15_000
