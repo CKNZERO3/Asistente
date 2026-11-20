@@ -7,10 +7,10 @@ class ClienteProveedoresIATest {
 
     @Test
     fun normalizaEndpointsOpenAIYLocales() {
-        assertThat(ClienteProveedoresIA.normalizarEndpointOpenAI("[https://api.groq.com/openai/v1](https://api.groq.com/openai/v1)"))
-            .isEqualTo("[https://api.groq.com/openai/v1/chat/completions](https://api.groq.com/openai/v1/chat/completions)")
-        assertThat(ClienteProveedoresIA.normalizarEndpointOpenAI("[http://127.0.0.1:11434/v1/chat/completions/](http://127.0.0.1:11434/v1/chat/completions/)"))
-            .isEqualTo("[http://127.0.0.1:11434/v1/chat/completions](http://127.0.0.1:11434/v1/chat/completions)")
+        assertThat(ClienteProveedoresIA.normalizarEndpointOpenAI("https://api.groq.com/openai/v1"))
+            .isEqualTo("https://api.groq.com/openai/v1/chat/completions")
+        assertThat(ClienteProveedoresIA.normalizarEndpointOpenAI("http://127.0.0.1:11434/v1/chat/completions/"))
+            .isEqualTo("http://127.0.0.1:11434/v1/chat/completions")
     }
 
     @Test
