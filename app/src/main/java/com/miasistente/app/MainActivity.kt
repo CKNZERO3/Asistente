@@ -128,20 +128,9 @@ class MainActivity : ComponentActivity() {
     }
 
     private val pickMemoryFile = registerForActivityResult(
-        ActivityResultContracts.GetContent()
+        ActivityResultContracts.OpenDocument()
     ) { uri ->
         if (uri != null) importarArchivoMemoria(uri)
-    }
-
-    private val pickMemoryFile = registerForActivityResult(
-    ActivityResultContracts.OpenDocument()
-    ) { uri ->
-    if (uri != null) {
-        lifecycleScope.launch {
-            val res = ImportadorMemoria.importarDesdeUri(applicationContext, uri)
-            aviso(res.mensaje)
-            }
-        }
     }
 
     private val pedirPermisosVoz = registerForActivityResult(
@@ -422,15 +411,6 @@ class MainActivity : ComponentActivity() {
             )
         )
 
-        val ultimaRespuestaAsistente = chat.messages
-        .lastOrNull { !it.fromUser && it.text.isNotBlank() }
-        ?.text
-
-        thinkingConversations[targetConvId] = true
-        if (targetConvId == activeConversationId) {
-            chat.updateThinking(true)
-        }
-
         val adjuntosObjetivo = adjuntosPendientes.ifEmpty {
             if (PoliticaArchivos.pideResumirArchivo(texto)) {
                 chat.messages.lastOrNull { msg ->
@@ -504,9 +484,9 @@ class MainActivity : ComponentActivity() {
                                 } else {
                                     "$texto (imágenes adjuntas: $listaNombres)"
                                 }
-                                procesador.procesar(consultaImagen, ultimoMensajeAsistente = ultimaRespuestaAsistente)
+                                procesador.procesar(consultaImagen)
                             }
-                            else -> procesador.procesar(texto, ultimoMensajeAsistente = ultimaRespuestaAsistente)
+                            else -> procesador.procesar(texto)
                         }
                     }
                 } ?: ResultadoComando(
@@ -805,7 +785,6 @@ class MainActivity : ComponentActivity() {
             "search" -> aviso("Búsqueda próximamente")
             "gallery" -> aviso("Galería próximamente")
             "import" -> pickMemoryFile.launch(arrayOf("text/*", "application/json"))
-            "import_model" -> pickModel.launch("*/*")
         }
     }
         
