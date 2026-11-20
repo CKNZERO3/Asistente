@@ -6,6 +6,7 @@ import android.provider.Settings
 import com.miasistente.app.BuildConfig
 import com.miasistente.app.accesibilidad.IrisAccessibilityService
 import com.miasistente.app.data.Ajustes
+import com.miasistente.app.data.PerfilUsuario
 import com.miasistente.app.memoria.MemoriaLocal
 import kotlinx.coroutines.CancellationException
 
@@ -19,13 +20,13 @@ class ProcesadorComandos(context: Context) {
     private val clima = ClimaOpenMeteo()
     private val modeloLocal = ModeloLocal(context)
     private val ajustes = Ajustes(appContext)
+    private val perfil = PerfilUsuario(appContext)
     private val notas = GestorNotas(appContext)
     private val memoria = MemoriaLocal.get(appContext)
 
     suspend fun procesar(
         texto: String,
-        palabraClave: String = ajustes.palabraClave,
-        ultimoMensajeAsistente: String? = null
+        palabraClave: String = ajustes.palabraClave
     ): ResultadoComando {
         val comando = quitarPalabraClave(texto, palabraClave)
         if (comando.isBlank()) {
@@ -33,37 +34,28 @@ class ProcesadorComandos(context: Context) {
         }
 
         if (patronLeerPantalla.containsMatchIn(normalizar(comando))) {
-            return leerPantalla()
+            return leerPantalla().also { registrarSiRespuestaUtil(it) }
         }
 
         return try {
             ComandosMemoria.interpretar(comando)?.let { accion ->
                 responderMemoria(accion)?.let { return it }
             }
+
+            // Interceptación prioritaria de guardado ("guárdalo en mi cuaderno", "en la app de notas", etc.)
+            // antes de pasar por el parser general o el LLM.
+            ExtractorNota.analizar(comando)?.let { peticion ->
+                return notas.guardar(peticion)
+            }
+
             when (val intencion = parser.parsear(comando)) {
-                is Intencion.ConsultaIA -> responderConsulta(intencion.pregunta)
-                is Intencion.CrearNota -> {
-                    val base = ExtractorNota.analizar(comando)
-                        ?: PeticionGuardar(ExtractorNota.limpiar(intencion.contenido), DestinoNota.SinEspecificar)
-
-                    val candidatoPrevio = (ultimoContenidoGenerado ?: ultimoMensajeAsistente)
-                        ?.removePrefix(AVISO_SIN_NUBE)
-                        ?.trim()
-                        ?.takeIf { it.isNotBlank() }
-
-                    val peticionFinal = if (
-                        base.contenido.isBlank() &&
-                        !base.mencionaAdjunto &&
-                        (base.refiereRespuestaAnterior || candidatoPrevio != null) &&
-                        candidatoPrevio != null
-                    ) {
-                        base.copy(contenido = ExtractorNota.limpiarRespuestaParaNota(candidatoPrevio))
-                    } else {
-                        base
-                    }
-
-                    notas.guardar(peticionFinal)
+                is Intencion.ConsultaIA -> responderConsulta(intencion.pregunta).also {
+                    registrarSiRespuestaUtil(it)
                 }
+                is Intencion.CrearNota -> notas.guardar(
+                    ExtractorNota.analizar(comando)
+                        ?: PeticionGuardar(ExtractorNota.limpiar(intencion.contenido), DestinoNota.SinEspecificar)
+                )
                 is Intencion.AbrirAplicacion -> local.ejecutar(intencion).also {
                     if (it.exito) memoria.registrarHabito(CONTEXTO_APPS, normalizar(intencion.nombreApp))
                 }
@@ -76,6 +68,10 @@ class ProcesadorComandos(context: Context) {
         }
     }
 
+    /**
+     * "Guarda esta imagen en el cuaderno Recetas" con adjuntos. Devuelve null si el texto no es
+     * una orden de guardar, y entonces la pantalla sigue con el flujo normal de adjuntos.
+     */
     suspend fun guardarAdjuntos(texto: String, adjuntos: List<AdjuntoNota>): ResultadoComando? {
         if (adjuntos.isEmpty()) return null
         val comando = quitarPalabraClave(texto, ajustes.palabraClave)
@@ -83,6 +79,7 @@ class ProcesadorComandos(context: Context) {
         return notas.guardar(peticion, adjuntos)
     }
 
+    /** Memoria esencial y seguimiento de notas: todo local, sin internet. */
     private suspend fun responderMemoria(accion: AccionMemoria): ResultadoComando? = when (accion) {
         AccionMemoria.NoSeGuardo -> notas.reintentarUltima()
         is AccionMemoria.Recordar -> {
@@ -94,13 +91,29 @@ class ProcesadorComandos(context: Context) {
             if (encontrados.isEmpty()) {
                 ResultadoComando(
                     true,
-                    if (accion.tema == null) "Todavía no me has pedido que recuerde nada. Dime «recuerda que…»."
+                    if (accion.tema == null) "Todavía no me has pedido que recuerde nada. Dime «recuerda que…» o importa un archivo de memoria."
                     else "No tengo nada guardado sobre «${accion.tema}»."
                 )
             } else {
                 ResultadoComando(true, "Esto es lo que recuerdo:\n" + encontrados.joinToString("\n") { "• $it" })
             }
         }
+    }
+
+    private fun registrarSiRespuestaUtil(resultado: ResultadoComando) {
+        if (resultado.exito && resultado.mensaje.isNotBlank()) {
+            val limpio = resultado.mensaje.removePrefix(AVISO_SIN_NUBE).trim()
+            GestorNotas.registrarContenidoGenerado(limpio)
+        }
+    }
+
+    private suspend fun systemPromptLocal(consulta: String): String {
+        val nombreUsuario = perfil.nombre.ifBlank {
+            appContext.getSharedPreferences("iris_prefs", Context.MODE_PRIVATE)
+                .getString("user_name", null)
+        }
+        val contexto = memoria.construirContextoUsuario(consulta, nombreUsuario)
+        return construirInstruccionLocal(contexto)
     }
 
     private val patronLeerPantalla =
@@ -144,10 +157,7 @@ class ProcesadorComandos(context: Context) {
     }
 
     private suspend fun responderConsulta(pregunta: String): ResultadoComando {
-        habilidades.responder(pregunta)?.let {
-            ultimoContenidoGenerado = it
-            return ResultadoComando(true, it)
-        }
+        habilidades.responder(pregunta)?.let { return ResultadoComando(true, it) }
         habilidades.peticionClima(pregunta)?.let { return consultarClima(it) }
 
         val seleccion = IrisModelSelector.seleccionar(pregunta)
@@ -159,16 +169,17 @@ class ProcesadorComandos(context: Context) {
             )
         }
 
+        // Si el usuario pregunta sobre algo guardado en su memoria local y no hay red (o es breve),
+        // el modelo local recibe el resumen FTS del usuario en su systemPrompt.
+        val recuerdosRelevantes = if (!tiempoReal) memoria.buscar(pregunta, limite = 3) else emptyList()
         val usarLocalPrimero = modeloLocal.disponible() &&
-            seleccion.categoria == CategoriaTarea.LIGERA && !tiempoReal
+            !tiempoReal &&
+            (seleccion.categoria == CategoriaTarea.LIGERA ||
+                (!Conectividad.hayInternet(appContext) && recuerdosRelevantes.isNotEmpty()))
 
         if (usarLocalPrimero) {
-            val instruccionConMemoria = INSTRUCCION_LOCAL + memoria.construirContextoUsuario(pregunta)
-            modeloLocal.generar(instruccionConMemoria, pregunta)
-                .onSuccess {
-                    ultimoContenidoGenerado = it
-                    return ResultadoComando(true, it)
-                }
+            modeloLocal.generar(systemPromptLocal(pregunta), pregunta)
+                .onSuccess { return ResultadoComando(true, it) }
         }
         return consultarIris(
             pregunta,
@@ -200,14 +211,15 @@ class ProcesadorComandos(context: Context) {
 
         val cabeEnLocal = contenido.length <= PoliticaArchivos.MAX_CARACTERES_LOCAL && modeloLocal.disponible()
         if (cabeEnLocal) {
-            val instruccionConMemoria = INSTRUCCION_LOCAL + memoria.construirContextoUsuario(indicacion)
-            modeloLocal.generar(instruccionConMemoria, peticion)
+            modeloLocal.generar(systemPromptLocal(indicacion), peticion)
                 .onSuccess {
-                    ultimoContenidoGenerado = it
-                    return ResultadoComando(true, it)
+                    val res = ResultadoComando(true, it)
+                    registrarSiRespuestaUtil(res)
+                    return res
                 }
         }
         return consultarIris(peticion, IrisModelSelector.MODELO_LIGERO, intentarLocalSiFalla = !cabeEnLocal)
+            .also { registrarSiRespuestaUtil(it) }
     }
 
     private suspend fun consultarClima(peticion: PeticionClima): ResultadoComando {
@@ -223,9 +235,7 @@ class ProcesadorComandos(context: Context) {
             if (datos == null) {
                 ResultadoComando(false, "No encontré una ciudad llamada «$ciudad».")
             } else {
-                val resumen = ClimaTexto.resumen(datos)
-                ultimoContenidoGenerado = resumen
-                ResultadoComando(true, resumen)
+                ResultadoComando(true, ClimaTexto.resumen(datos))
             }
         } catch (e: CancellationException) {
             throw e
@@ -241,12 +251,8 @@ class ProcesadorComandos(context: Context) {
     ): ResultadoComando {
         if (!Conectividad.hayInternet(appContext)) {
             if (intentarLocalSiFalla && modeloLocal.disponible()) {
-                val instruccionConMemoria = INSTRUCCION_LOCAL + memoria.construirContextoUsuario(pregunta)
-                modeloLocal.generar(instruccionConMemoria, pregunta)
-                    .onSuccess {
-                        ultimoContenidoGenerado = it
-                        return ResultadoComando(true, AVISO_SIN_NUBE + it)
-                    }
+                modeloLocal.generar(systemPromptLocal(pregunta), pregunta)
+                    .onSuccess { return ResultadoComando(true, AVISO_SIN_NUBE + it) }
             }
             return ResultadoComando(false, "Ahora mismo no tengo conexión a internet.")
         }
@@ -254,18 +260,11 @@ class ProcesadorComandos(context: Context) {
         val elegido = modelo ?: IrisModelSelector.seleccionar(pregunta).modelo
 
         return gemini.preguntar(pregunta, elegido).fold(
-            onSuccess = {
-                ultimoContenidoGenerado = it
-                ResultadoComando(true, it)
-            },
+            onSuccess = { ResultadoComando(true, it) },
             onFailure = { errorNube ->
                 if (intentarLocalSiFalla && modeloLocal.disponible()) {
-                    val instruccionConMemoria = INSTRUCCION_LOCAL + memoria.construirContextoUsuario(pregunta)
-                    modeloLocal.generar(instruccionConMemoria, pregunta)
-                        .onSuccess {
-                            ultimoContenidoGenerado = it
-                            return ResultadoComando(true, AVISO_SIN_NUBE + it)
-                        }
+                    modeloLocal.generar(systemPromptLocal(pregunta), pregunta)
+                        .onSuccess { return ResultadoComando(true, AVISO_SIN_NUBE + it) }
                 }
                 ResultadoComando(false, mensajeAmigable(errorNube))
             }
@@ -294,11 +293,10 @@ class ProcesadorComandos(context: Context) {
             "No pude completar la consulta. Inténtalo de nuevo."
     }
 
-    companion object {
-        private const val CONTEXTO_APPS = "app_abierta"
-        private const val AVISO_SIN_NUBE =
+    private companion object {
+        const val CONTEXTO_APPS = "app_abierta"
+        const val AVISO_SIN_NUBE =
             "No pude consultar a Gemini; esta respuesta viene de mi modelo local y puede tener errores.\n\n"
-
         /** Última respuesta útil generada por Iris (compartida entre pantalla y servicio de voz). */
         @Volatile var ultimoContenidoGenerado: String? = null
     }
