@@ -22,10 +22,8 @@ import java.io.File
 
 /**
  * IA que corre en el propio teléfono (LiteRT-LM, procesador). Se encarga de las tareas ligeras
- * para no gastar la cuota de Gemini. El modelo (.litertlm) lo importa el usuario desde Ajustes.
- *
- * El motor se carga solo cuando hace falta y se libera tras unos minutos sin uso, para no
- * ocupar memoria. El estado es compartido por toda la app (un único motor).
+ * para no gastar la cuota de Gemini y recibe contexto compacto de [MemoriaLocal] para conocer
+ * al usuario sin conexión.
  */
 class ModeloLocal(context: Context) {
 
@@ -137,7 +135,14 @@ class ModeloLocal(context: Context) {
     }
 }
 
-/** Instrucción de sistema para las respuestas del modelo local. */
+/** Instrucción base de sistema para el modelo local. */
 const val INSTRUCCION_LOCAL =
     "Eres Iris, una asistente en español. Responde de forma breve, clara y directa. " +
         "Si no sabes algo, dilo; no inventes datos."
+
+/** Combina la instrucción base con el resumen compacto de la memoria local del usuario. */
+fun construirInstruccionLocal(contextoUsuario: String): String {
+    val ctx = contextoUsuario.trim()
+    if (ctx.isEmpty()) return INSTRUCCION_LOCAL
+    return "$INSTRUCCION_LOCAL\n\nMemoria y preferencias del usuario (úsalas de forma natural si son relevantes):\n$ctx"
+}
