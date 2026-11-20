@@ -40,7 +40,7 @@ class GeminiClient(
 
     companion object {
         const val MODELO_POR_DEFECTO = IrisModelSelector.MODELO_GENERAL
-        private const val BASE = "https://asistente.cristian-nava-ruido.workers.dev/v1beta/models"
+        private const val BASE = "[https://asistente.cristian-nava-ruido.workers.dev/v1beta/models](https://asistente.cristian-nava-ruido.workers.dev/v1beta/models)"
         private const val TAG = "IrisGeminiClient"
         private val cuota = CuotaModelos()
         private const val TIMEOUT_CONEXION_MS = 15_000
@@ -56,13 +56,14 @@ class GeminiClient(
 
     suspend fun preguntar(
         pregunta: String,
-        modeloSolicitado: String = modelo
+        modeloSolicitado: String = modelo,
+        instruccionesExtra: String = "",
+        permitirBusquedaWeb: Boolean = true
     ): Result<String> = withContext(Dispatchers.IO) {
         val modeloInicial = modeloSolicitado
             .takeIf(IrisModelSelector::esModeloPermitido)
             ?: MODELO_POR_DEFECTO
         val todos = candidatosFallback(modeloInicial)
-        // Los modelos con la cuota agotada se saltan sin gastar otra petición.
         val candidatos = todos.filter(cuota::disponible)
         if (candidatos.isEmpty()) {
             val espera = todos.minOf(cuota::segundosRestantes)
@@ -75,7 +76,12 @@ class GeminiClient(
         for (indice in candidatos.indices) {
             val modeloActual = candidatos[indice]
             try {
-                val texto = llamarConCompatibilidad(pregunta, modeloActual)
+                val texto = llamarConCompatibilidad(
+                    pregunta = pregunta,
+                    modelo = modeloActual,
+                    instruccionesExtra = instruccionesExtra,
+                    permitirBusquedaWeb = permitirBusquedaWeb
+                )
                 cuota.registrarExito(modeloActual)
                 return@withContext Result.success(texto)
             } catch (e: CancellationException) {
@@ -107,11 +113,6 @@ class GeminiClient(
         Result.failure(ultimoError ?: IOException("No hay un modelo disponible."))
     }
 
-    /**
-     * Un 429 del propio Worker no se arregla cambiando de modelo: respeta el límite
-     * del Worker y no multiplica solicitudes inútiles. Los 429 de Google sí permiten
-     * probar una alternativa con cuota disponible.
-     */
     private fun debeProbarModeloAlternativo(error: HttpException): Boolean {
         val mensaje = error.message.orEmpty()
         return when (error.codigo) {
@@ -147,22 +148,28 @@ class GeminiClient(
                 )
         }.distinct()
 
-    /**
-     * Algunos modelos o proyectos pueden no aceptar Google Search en una solicitud.
-     * Ante un HTTP 400 se reintenta una sola vez sin esa herramienta.
-     */
-    private fun llamarConCompatibilidad(pregunta: String, modelo: String): String =
-        try {
-            llamar(pregunta, modelo, conBusqueda = true)
+    private fun llamarConCompatibilidad(
+        pregunta: String,
+        modelo: String,
+        instruccionesExtra: String,
+        permitirBusquedaWeb: Boolean
+    ): String {
+        if (!permitirBusquedaWeb) {
+            return llamar(pregunta, modelo, instruccionesExtra, conBusqueda = false)
+        }
+        return try {
+            llamar(pregunta, modelo, instruccionesExtra, conBusqueda = true)
         } catch (e: HttpException) {
             if (e.codigo != 400) throw e
             Log.i(TAG, "Se reintentará $modelo sin Google Search.")
-            llamar(pregunta, modelo, conBusqueda = false)
+            llamar(pregunta, modelo, instruccionesExtra, conBusqueda = false)
         }
+    }
 
     private fun llamar(
         pregunta: String,
         modelo: String,
+        instruccionesExtra: String,
         conBusqueda: Boolean
     ): String {
         val cuerpo = JSONObject().apply {
@@ -170,7 +177,7 @@ class GeminiClient(
                 "systemInstruction",
                 JSONObject().put(
                     "parts",
-                    JSONArray().put(JSONObject().put("text", instruccionConFecha()))
+                    JSONArray().put(JSONObject().put("text", instruccionConFecha(instruccionesExtra)))
                 )
             )
             put(
@@ -219,18 +226,17 @@ class GeminiClient(
         }
     }
 
-    /**
-     * La fecha y hora del teléfono, para que "hoy", "ayer" o "este año" se interpreten bien
-     * y la búsqueda en internet traiga datos de la fecha correcta.
-     */
-    private fun instruccionConFecha(): String {
+    private fun instruccionConFecha(instruccionesExtra: String): String {
         val formato = java.text.SimpleDateFormat(
             "EEEE d 'de' MMMM 'de' yyyy, HH:mm",
             java.util.Locale.forLanguageTag("es")
         )
-        return "$INSTRUCCION Fecha y hora actuales del usuario: ${formato.format(java.util.Date())}. " +
+        val base = "$INSTRUCCION Fecha y hora actuales del usuario: ${formato.format(java.util.Date())}. " +
             "Para noticias, resultados deportivos, precios, personas públicas o datos recientes, " +
             "usa la búsqueda en internet y responde con lo más actual que encuentres."
+        val extra = instruccionesExtra.trim()
+        return if (extra.isEmpty()) base
+        else "$base\n\nInstrucciones personalizadas del usuario (síguelas en tus respuestas):\n$extra"
     }
 
     private fun HttpURLConnection.inputStreamOrNull() =
