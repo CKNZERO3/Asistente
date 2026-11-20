@@ -28,10 +28,6 @@ class IntentParser {
 
         // El orden importa: la primera regla que encaje gana.
         val REGLAS = listOf(
-            // Notas ("escribe" no captura correos ni mensajes)
-            regla("""^(?:(?:crea|crear|nueva|toma|anade|agrega) (?:una )?nota|(?:guarda|guardar|anota|anotar|apunta|apuntar|recuerdame|recordarme|escribe(?!\s+(?:un |el )?(?:correo|mensaje|email)\b)|escribir)(?: una nota| nota)?)\b[:, ]*(?:(?:que|de|sobre) )?(.*)$""") {
-                Intencion.CrearNota(it)
-            },
             // Abrir aplicaciones
             regla("""^(?:abre(?:me)?|abrir|ejecuta(?:me)?|ejecutar|lanza)\b\s*(?:(?:la|el)\s+)?(?:(?:aplicacion|app)\s+)?(?:de\s+)?(.+)$""") {
                 Intencion.AbrirAplicacion(it)
@@ -45,8 +41,14 @@ class IntentParser {
 
     fun parsear(texto: String): Intencion {
         val original = texto.trim()
+
+        // Interceptar todas las órdenes de guardar/anotar (incluyendo "guárdalo", "en la app de notas", etc.)
+        // antes de cualquier ruta hacia el LLM.
+        ExtractorNota.analizar(original)?.let { peticion ->
+            return Intencion.CrearNota(peticion.contenido)
+        }
+
         val norm = normalizar(original)
-        // El contenido se corta del original para conservar acentos y mayúsculas
         val base = if (original.length == norm.length) original else norm
         val k = CORTESIA.find(norm)?.value?.length ?: 0
         val cuerpo = norm.substring(k)
