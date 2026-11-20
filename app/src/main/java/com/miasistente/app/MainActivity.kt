@@ -618,6 +618,10 @@ class MainActivity : ComponentActivity() {
             }
             aviso("Importando el modelo… puede tardar un minuto")
             val resultado = ModeloLocal(applicationContext).importar(uri, archivo.sizeBytes)
+            if (resultado.isSuccess) {
+                com.miasistente.app.data.InteligenciaConfig(applicationContext)
+                    .nombreModeloLocalInstalado = archivo.name
+            }
             aviso(
                 if (resultado.isSuccess) "IA local lista"
                 else resultado.exceptionOrNull()?.message ?: "No pude importar el modelo"
