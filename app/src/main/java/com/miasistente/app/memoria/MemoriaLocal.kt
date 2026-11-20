@@ -4,7 +4,6 @@ import android.content.ContentValues
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.util.Log
-import com.miasistente.app.data.PerfilUsuario
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
@@ -19,10 +18,7 @@ data class Cuaderno(
     val titulo: String,
     val cuerpo: String,
     val papel: String,
-    val actualizado: Long,
-    val fondo: String = "Ninguno",
-    val fijado: Boolean = false,
-    val bloqueado: Boolean = false
+    val actualizado: Long
 )
 
 data class EntradaCuaderno(
@@ -36,16 +32,17 @@ data class EntradaCuaderno(
     val creado: Long
 )
 
-data class RecuerdoItem(
-    val id: Long,
-    val valor: String,
-    val creado: Long
-)
-
+/**
+ * Memoria local de Iris: 100 % sin internet.
+ *
+ * - Lecturas frecuentes (lista de cuadernos, hábitos) salen de una caché en RAM.
+ * - Todas las escrituras van a un único hilo propio, en orden, sin tocar el hilo de la pantalla.
+ * - [registrarHabito] no espera: actualiza en segundo plano y no añade latencia.
+ * - Provee contexto compacto del usuario para inyectar en el systemPrompt del modelo local.
+ */
 class MemoriaLocal private constructor(context: Context) {
 
-    private val appContext = context.applicationContext
-    private val db = IrisDatabase(appContext)
+    private val db = IrisDatabase(context)
     private val ambito = CoroutineScope(
         SupervisorJob() + HILO + CoroutineExceptionHandler { _, e -> Log.e(TAG, "Error en memoria local", e) }
     )
@@ -58,11 +55,7 @@ class MemoriaLocal private constructor(context: Context) {
     suspend fun cuadernos(): List<Cuaderno> =
         cacheCuadernos ?: withContext(HILO) { cacheCuadernos ?: leerCuadernos().also { cacheCuadernos = it } }
 
-    suspend fun crearCuaderno(
-        titulo: String,
-        papel: String = "Líneas",
-        fondo: String = "Ninguno"
-    ): Cuaderno = withContext(HILO) {
+    suspend fun crearCuaderno(titulo: String, papel: String = "Líneas"): Cuaderno = withContext(HILO) {
         val ahora = System.currentTimeMillis()
         val limpio = titulo.trim().ifBlank { "Notas" }.take(60)
         val id = db.writableDatabase.insertOrThrow(
@@ -73,26 +66,15 @@ class MemoriaLocal private constructor(context: Context) {
                 put("titulo_norm", ClasificadorCuadernos.normalizarTexto(limpio))
                 put("cuerpo", "")
                 put("papel", papel)
-                put("fondo", fondo)
-                put("fijado", 0)
-                put("bloqueado", 0)
                 put("creado", ahora)
                 put("actualizado", ahora)
             }
         )
         cacheCuadernos = null
-        Cuaderno(id, limpio, "", papel, ahora, fondo, fijado = false, bloqueado = false)
+        Cuaderno(id, limpio, "", papel, ahora)
     }
 
-    suspend fun actualizarCuaderno(
-        id: Long,
-        titulo: String,
-        cuerpo: String,
-        papel: String,
-        fondo: String = "Ninguno",
-        fijado: Boolean = false,
-        bloqueado: Boolean = false
-    ) = withContext(HILO) {
+    suspend fun actualizarCuaderno(id: Long, titulo: String, cuerpo: String, papel: String) = withContext(HILO) {
         db.writableDatabase.update(
             "cuadernos",
             ContentValues().apply {
@@ -100,9 +82,6 @@ class MemoriaLocal private constructor(context: Context) {
                 put("titulo_norm", ClasificadorCuadernos.normalizarTexto(titulo))
                 put("cuerpo", cuerpo)
                 put("papel", papel)
-                put("fondo", fondo)
-                put("fijado", if (fijado) 1 else 0)
-                put("bloqueado", if (bloqueado) 1 else 0)
                 put("actualizado", System.currentTimeMillis())
             },
             "id = ?",
@@ -125,6 +104,7 @@ class MemoriaLocal private constructor(context: Context) {
         db.writableDatabase.delete("habitos", "opcion = ? AND contexto LIKE 'tema:%'", arrayOf(id.toString()))
     }
 
+    /** Cuaderno por nombre: igual, o empieza igual ("receta" → "Recetas"). */
     suspend fun buscarCuadernoPorNombre(nombre: String): Cuaderno? {
         val buscado = ClasificadorCuadernos.normalizarTexto(nombre).trim()
         if (buscado.isEmpty()) return null
@@ -166,12 +146,10 @@ class MemoriaLocal private constructor(context: Context) {
                 )
             }
             if (tipo == TIPO_TEXTO && texto.isNotBlank()) {
-                val bloque = if (texto.contains('\n')) texto else "• $texto"
-                val separador = if (texto.contains('\n')) "\n\n$texto" else "\n• $texto"
                 w.execSQL(
                     "UPDATE cuadernos SET cuerpo = CASE WHEN cuerpo = '' THEN ? ELSE cuerpo || ? END, " +
                         "actualizado = ? WHERE id = ?",
-                    arrayOf<Any>(bloque, separador, ahora, cuadernoId)
+                    arrayOf<Any>("• $texto", "\n• $texto", ahora, cuadernoId)
                 )
             } else {
                 w.execSQL("UPDATE cuadernos SET actualizado = ? WHERE id = ?", arrayOf<Any>(ahora, cuadernoId))
@@ -180,13 +158,6 @@ class MemoriaLocal private constructor(context: Context) {
         }
         cacheCuadernos = null
         id
-    }
-
-    suspend fun eliminarEntrada(entradaId: Long) = withContext(HILO) {
-        transaccion { w ->
-            w.execSQL("DELETE FROM entradas_fts WHERE rowid = ?", arrayOf<Any>(entradaId))
-            w.delete("entradas", "id = ?", arrayOf(entradaId.toString()))
-        }
     }
 
     suspend fun adjuntos(cuadernoId: Long): List<EntradaCuaderno> = withContext(HILO) {
@@ -221,72 +192,69 @@ class MemoriaLocal private constructor(context: Context) {
         }
     }
 
-    // --- Memoria esencial (hechos, importación e inyección en IA local) ---------------------
+    // --- Memoria esencial (hechos, preferencias y memoria importada) -----------------------
 
     suspend fun recordar(valor: String, tipo: String = TIPO_HECHO) = withContext(HILO) {
         val limpio = valor.trim()
         if (limpio.isEmpty()) return@withContext
         transaccion { w ->
-            val id = w.insertOrThrow(
-                "memoria",
-                null,
-                ContentValues().apply {
-                    put("tipo", tipo)
-                    put("valor", limpio)
-                    put("creado", System.currentTimeMillis())
-                }
-            )
-            w.execSQL(
-                "INSERT INTO memoria_fts(rowid, texto) VALUES (?, ?)",
-                arrayOf<Any>(id, ClasificadorCuadernos.normalizarTexto(limpio))
-            )
+            insertarSiNoExiste(w, limpio, tipo, System.currentTimeMillis())
         }
     }
 
-    /** Inserta múltiples recuerdos deduplicados en una sola transacción (Sprint 2: Importar memoria). */
-    suspend fun recordarLote(valores: List<String>, tipo: String = TIPO_HECHO): Int = withContext(HILO) {
+    /**
+     * Importa en lote múltiples hechos o fragmentos de contexto del usuario dentro de una sola
+     * transacción SQLite + FTS4, omitiendo duplicados. Devuelve la cantidad de elementos nuevos.
+     */
+    suspend fun importarHechos(valores: List<String>, tipo: String = TIPO_IMPORTADO): Int = withContext(HILO) {
         if (valores.isEmpty()) return@withContext 0
-        val existentes = HashSet<String>()
-        db.readableDatabase.rawQuery(
-            "SELECT valor FROM memoria WHERE tipo = ?",
-            arrayOf(tipo)
-        ).use { c ->
-            while (c.moveToNext()) {
-                existentes.add(ClasificadorCuadernos.normalizarTexto(c.getString(0)).trim())
-            }
-        }
-
         var insertados = 0
-        val ahora = System.currentTimeMillis()
+        val baseTiempo = System.currentTimeMillis()
         transaccion { w ->
-            for (raw in valores) {
-                val limpio = raw.trim().take(400)
-                if (limpio.length < 3) continue
-                val norm = ClasificadorCuadernos.normalizarTexto(limpio).trim()
-                if (!existentes.add(norm)) continue
-                val id = w.insertOrThrow(
-                    "memoria",
-                    null,
-                    ContentValues().apply {
-                        put("tipo", tipo)
-                        put("valor", limpio)
-                        put("creado", ahora + insertados)
-                    }
-                )
-                w.execSQL(
-                    "INSERT INTO memoria_fts(rowid, texto) VALUES (?, ?)",
-                    arrayOf<Any>(id, norm)
-                )
-                insertados++
+            valores.forEachIndexed { idx, raw ->
+                val limpio = raw.trim()
+                if (limpio.isNotEmpty() && insertarSiNoExiste(w, limpio, tipo, baseTiempo + idx)) {
+                    insertados++
+                }
             }
         }
         insertados
     }
 
+    private fun insertarSiNoExiste(
+        w: SQLiteDatabase,
+        valor: String,
+        tipo: String,
+        timestamp: Long
+    ): Boolean {
+        val norm = ClasificadorCuadernos.normalizarTexto(valor).trim()
+        if (norm.isEmpty()) return false
+        val yaExiste = w.rawQuery(
+            "SELECT id FROM memoria WHERE lower(trim(valor)) = lower(trim(?)) LIMIT 1",
+            arrayOf(valor)
+        ).use { it.moveToFirst() }
+        if (yaExiste) return false
+
+        val id = w.insertOrThrow(
+            "memoria",
+            null,
+            ContentValues().apply {
+                put("tipo", tipo)
+                put("valor", valor)
+                put("creado", timestamp)
+            }
+        )
+        w.execSQL(
+            "INSERT INTO memoria_fts(rowid, texto) VALUES (?, ?)",
+            arrayOf<Any>(id, norm)
+        )
+        return true
+    }
+
     suspend fun hechos(limite: Int = 10): List<String> = withContext(HILO) {
         db.readableDatabase.rawQuery(
-            "SELECT valor FROM memoria WHERE tipo = ? ORDER BY creado DESC LIMIT ?",
-            arrayOf(TIPO_HECHO, limite.toString())
+            "SELECT valor FROM memoria WHERE tipo IN (?, ?) ORDER BY creado DESC LIMIT ?",
+            arrayOf(TIPO_HECHO, TIPO_IMPORTADO, limite.toString())
         ).use { c ->
             val lista = mutableListOf<String>()
             while (c.moveToNext()) lista.add(c.getString(0))
@@ -294,33 +262,7 @@ class MemoriaLocal private constructor(context: Context) {
         }
     }
 
-    suspend fun listarRecuerdos(limite: Int = 60): List<RecuerdoItem> = withContext(HILO) {
-        db.readableDatabase.rawQuery(
-            "SELECT id, valor, creado FROM memoria WHERE tipo = ? ORDER BY creado DESC LIMIT ?",
-            arrayOf(TIPO_HECHO, limite.toString())
-        ).use { c ->
-            val lista = mutableListOf<RecuerdoItem>()
-            while (c.moveToNext()) {
-                lista.add(RecuerdoItem(c.getLong(0), c.getString(1), c.getLong(2)))
-            }
-            lista
-        }
-    }
-
-    suspend fun contarRecuerdos(): Int = withContext(HILO) {
-        db.readableDatabase.rawQuery(
-            "SELECT COUNT(*) FROM memoria WHERE tipo = ?",
-            arrayOf(TIPO_HECHO)
-        ).use { c -> if (c.moveToFirst()) c.getInt(0) else 0 }
-    }
-
-    suspend fun eliminarRecuerdo(id: Long) = withContext(HILO) {
-        transaccion { w ->
-            w.execSQL("DELETE FROM memoria_fts WHERE rowid = ?", arrayOf<Any>(id))
-            w.delete("memoria", "id = ?", arrayOf(id.toString()))
-        }
-    }
-
+    /** Búsqueda de texto completo en la memoria y en los cuadernos. */
     suspend fun buscar(consulta: String, limite: Int = 6): List<String> = withContext(HILO) {
         val expresion = expresionFts(consulta) ?: return@withContext emptyList()
         val resultados = mutableListOf<String>()
@@ -343,25 +285,53 @@ class MemoriaLocal private constructor(context: Context) {
     }
 
     /**
-     * Construye un bloque compacto de contexto personal (perfil + recuerdos relevantes)
-     * para inyectarlo en el prompt del modelo local (Gemma 3 1B) sin gastar cuota de red.
+     * Construye un resumen compacto de la memoria del usuario (hechos relevantes por FTS +
+     * recuerdos recientes + nombre) para inyectarlo en el systemPrompt del modelo local (LiteRT).
      */
-    suspend fun construirContextoUsuario(consulta: String, maxCaracteres: Int = 450): String {
-        val nombre = runCatching { PerfilUsuario(appContext).nombre.trim() }.getOrDefault("")
-        val relevantes = buscar(consulta, limite = 4)
-        val recientes = hechos(limite = 4)
-        val combinados = (relevantes + recientes).distinct().take(6)
+    suspend fun construirContextoUsuario(
+        consulta: String = "",
+        nombreUsuario: String? = null,
+        maxCaracteres: Int = 650
+    ): String = withContext(HILO) {
+        val seleccionados = LinkedHashSet<String>()
 
-        if (nombre.isEmpty() && combinados.isEmpty()) return ""
+        nombreUsuario?.trim()?.takeIf { it.isNotEmpty() }?.let {
+            seleccionados.add("El usuario se llama $it.")
+        }
 
-        val sb = StringBuilder("\n\nContexto del usuario (úsalos solo si aportan a la respuesta):")
-        if (nombre.isNotEmpty()) sb.append("\n- Nombre del usuario: $nombre")
-        for (item in combinados) {
-            val linea = "\n- $item"
+        // 1. Coincidencias semánticas/FTS con la pregunta actual
+        val expr = expresionFts(consulta)
+        if (expr != null) {
+            runCatching {
+                db.readableDatabase.rawQuery(
+                    "SELECT m.valor FROM memoria_fts f JOIN memoria m ON m.id = f.rowid " +
+                        "WHERE memoria_fts MATCH ? ORDER BY m.creado DESC LIMIT 4",
+                    arrayOf(expr)
+                ).use { c ->
+                    while (c.moveToNext()) seleccionados.add(c.getString(0))
+                }
+            }
+        }
+
+        // 2. Hechos recientes e importados para que el LLM local conozca al usuario
+        db.readableDatabase.rawQuery(
+            "SELECT valor FROM memoria WHERE tipo IN (?, ?) ORDER BY creado DESC LIMIT 8",
+            arrayOf(TIPO_HECHO, TIPO_IMPORTADO)
+        ).use { c ->
+            while (c.moveToNext() && seleccionados.size < 8) {
+                seleccionados.add(c.getString(0))
+            }
+        }
+
+        if (seleccionados.isEmpty()) return@withContext ""
+
+        val sb = StringBuilder()
+        for (item in seleccionados) {
+            val linea = "- ${item.take(140)}\n"
             if (sb.length + linea.length > maxCaracteres) break
             sb.append(linea)
         }
-        return sb.toString()
+        sb.toString().trim()
     }
 
     // --- Hábitos (aprendizaje progresivo) --------------------------------------------------
@@ -392,24 +362,12 @@ class MemoriaLocal private constructor(context: Context) {
 
     private fun leerCuadernos(): List<Cuaderno> =
         db.readableDatabase.rawQuery(
-            "SELECT id, titulo, cuerpo, papel, actualizado, fondo, fijado, bloqueado " +
-                "FROM cuadernos ORDER BY fijado DESC, actualizado DESC, id ASC",
+            "SELECT id, titulo, cuerpo, papel, actualizado FROM cuadernos ORDER BY id",
             null
         ).use { c ->
             val lista = mutableListOf<Cuaderno>()
             while (c.moveToNext()) {
-                lista.add(
-                    Cuaderno(
-                        id = c.getLong(0),
-                        titulo = c.getString(1),
-                        cuerpo = c.getString(2),
-                        papel = c.getString(3),
-                        actualizado = c.getLong(4),
-                        fondo = c.getStringOrNull(5) ?: "Ninguno",
-                        fijado = c.getInt(6) == 1,
-                        bloqueado = c.getInt(7) == 1
-                    )
-                )
+                lista.add(Cuaderno(c.getLong(0), c.getString(1), c.getString(2), c.getString(3), c.getLong(4)))
             }
             lista
         }
@@ -445,6 +403,7 @@ class MemoriaLocal private constructor(context: Context) {
         const val TIPO_IMAGEN = "imagen"
         const val TIPO_ARCHIVO = "archivo"
         const val TIPO_HECHO = "hecho"
+        const val TIPO_IMPORTADO = "importado"
 
         private val HILO = Executors.newSingleThreadExecutor { r ->
             Thread(r, "iris-memoria").apply { isDaemon = true }
@@ -457,6 +416,7 @@ class MemoriaLocal private constructor(context: Context) {
                 instancia ?: MemoriaLocal(context.applicationContext).also { instancia = it }
             }
 
+        /** "mi color favorito" → "color* favorito*" (prefijos, solo letras y números). */
         fun expresionFts(consulta: String): String? {
             val palabras = ClasificadorCuadernos.palabras(consulta)
                 .map { p -> p.filter { it.isLetterOrDigit() } }
