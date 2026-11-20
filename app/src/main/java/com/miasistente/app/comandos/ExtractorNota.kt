@@ -1,18 +1,33 @@
 package com.miasistente.app.comandos
 
+/** Adónde quiere el usuario guardar lo que dicta. */
 sealed interface DestinoNota {
+    /** Cuaderno de Iris Notebook. [nombre] null = "en mi cuaderno", sin decir cuál. */
     data class Cuaderno(val nombre: String?) : DestinoNota
+
+    /** App externa nombrada por el usuario ("Keep", "Samsung Notes"…). */
     data class App(val nombre: String) : DestinoNota
+
+    /** No dijo dónde: decide el hábito aprendido. */
     data object SinEspecificar : DestinoNota
 }
 
+/** Lo que hay que guardar (sin palabras de la orden) y dónde. */
 data class PeticionGuardar(
     val contenido: String,
     val destino: DestinoNota,
+    /** El usuario se refirió a una imagen o archivo ("guarda esta imagen…"). */
     val mencionaAdjunto: Boolean = false,
-    val refiereRespuestaAnterior: Boolean = false
+    /** El usuario se refirió a la respuesta o texto anterior ("guárdalo", "anota eso"). */
+    val referenciaAnterior: Boolean = false
 )
 
+/**
+ * Separa la orden ("puedes crear una nota y guardarla:") del contenido ("comprar pan, leche")
+ * y detecta el destino ("en Keep", "en el cuaderno Recetas", "en Trabajo").
+ *
+ * Funciona sin red y sin IA: solo reglas, para que sea instantáneo.
+ */
 object ExtractorNota {
 
     private val CORTESIA = Regex(
@@ -21,21 +36,19 @@ object ExtractorNota {
 
     private val VERBO = Regex(
         """^(?:(?:crea|crear|creame|haz|hazme|nueva|toma|tomar|anade|anadir|agrega|agregar)\s+(?:una\s+|un\s+|la\s+)?(?:nota|apunte)""" +
-            """|guardame|guardalo|guardala|guarda|guardar|anotame|anotalo|anotala|anota|anotar|apuntame|apuntalo|apunta|apuntar|recuerdame|recordarme""" +
+            """|guardame|guardalo|guardala|guardalos|guardalas|guarda|guardar|anotame|anotalo|anotala|anota|anotar|apuntame|apuntalo|apuntala|apunta|apuntar|recuerdame|recordarme""" +
             """|escribeme|escribe(?!\s+(?:un\s+|el\s+)?(?:correo|mensaje|email)\b)|escribir)\b"""
     )
 
-    private val PRONOMBRE_ENCLITICO = Regex(
-        """^(?:guardalo|guardala|guardame|anotalo|anotala|apuntalo)\b"""
-    )
-
-    private val REFERENCIA_ANTERIOR = Regex(
-        """^(?:eso|esto|lo anterior|esa respuesta|esta respuesta|la respuesta|ese texto|este texto|todo eso|todo esto|el resultado|lo que dijiste|lo que me dijiste|lo que acabas de decir)\b"""
-    )
-
+    /** Palabras de la orden que nunca forman parte del contenido. */
     private val RELLENO = Regex(
-        """^(?:y\s+(?:la\s+|lo\s+)?(?:guarda|guardala|guardalo|guardarla|guardarlo|guardes|guardas|guardame)""" +
+        """^(?:y\s+(?:la\s+|lo\s+|las\s+|los\s+)?(?:guarda|guardala|guardalo|guardarla|guardarlo|guardes|guardas|guardame)""" +
             """|(?:una|la|esta|esa|mi|un)\s+(?:nota|apunte)|nota|tambien|rapido|rapidamente|por favor|porfa)\b"""
+    )
+
+    /** Referencias al mensaje o respuesta anterior ("guárdalo", "anota eso", "guarda lo anterior"). */
+    private val REF_ANTERIOR = Regex(
+        """^(?:esto|eso|lo\s+anterior|lo\s+ultimo|la\s+ultima\s+respuesta|la\s+respuesta|esa\s+respuesta|ese\s+texto|el\s+texto\s+anterior)\b"""
     )
 
     private val ADJUNTO = Regex(
@@ -59,8 +72,10 @@ object ExtractorNota {
 
     private val DESTINO_APP_GENERICA = Regex("""^(?:en|con)\s+(?:la\s+|mi\s+)?(?:app|aplicacion)\s+(?:de\s+)?([a-z0-9]\w*)""")
 
+    /** "en la lista": no es un destino concreto. */
     private val LISTA = Regex("""^en\s+(?:la|mi|una|las|mis)\s+listas?\b""")
 
+    /** "anota en Trabajo …": cuaderno de una palabra. */
     private val DESTINO_NOMBRE = Regex(
         """^en\s+(?!(?:la|el|un|una|mi|mis|los|las|que|cuanto|cuanta|cuando|caso|vez|serio|cuenta)\b)([a-z0-9]\w*)"""
     )
@@ -69,6 +84,7 @@ object ExtractorNota {
         """^(?::|;|-|que diga|que dice|que ponga|que pone|diciendo|con el texto|lo siguiente|lo que sigue)"""
     )
 
+    /** Separador en cualquier punto (para limitar el nombre del cuaderno). */
     private val SEPARADOR_MEDIO = Regex("""\s*(?::|;|\bque diga\b|\bque dice\b|\bque ponga\b|\bque pone\b|\bdiciendo\b|\bcon el texto\b|\blo siguiente\b)""")
 
     private val INICIO_CONTENIDO = Regex("""^(?:de que|que|de|sobre|acerca de)\s+""")
@@ -78,6 +94,7 @@ object ExtractorNota {
     )
     private val ESPACIOS = Regex("""\s+""")
 
+    /** Devuelve null si la frase no es una orden de guardar o anotar. */
     fun analizar(frase: String): PeticionGuardar? {
         val original = frase.trim()
         if (original.isEmpty()) return null
@@ -87,7 +104,11 @@ object ExtractorNota {
         var i = saltarEspacios(norm, 0)
         CORTESIA.find(norm.substring(i))?.let { i = saltarEspacios(norm, i + it.value.length) }
         val verbo = VERBO.find(norm.substring(i)) ?: return null
-        var refiereAnterior = PRONOMBRE_ENCLITICO.containsMatchIn(verbo.value)
+
+        val verboTexto = verbo.value
+        var referenciaAnterior = verboTexto.endsWith("lo") || verboTexto.endsWith("la") ||
+            verboTexto.endsWith("los") || verboTexto.endsWith("las")
+
         i = saltarEspacios(norm, i + verbo.value.length)
 
         var destino: DestinoNota = DestinoNota.SinEspecificar
@@ -106,10 +127,10 @@ object ExtractorNota {
                 i = saltarEspacios(norm, i + 1)
                 continue
             }
-            val ref = REFERENCIA_ANTERIOR.find(resto)
-            if (ref != null) {
-                refiereAnterior = true
-                i = saltarEspacios(norm, i + ref.value.length)
+            val refAnt = REF_ANTERIOR.find(resto)
+            if (refAnt != null) {
+                referenciaAnterior = true
+                i = saltarEspacios(norm, i + refAnt.value.length)
                 continue
             }
             val relleno = RELLENO.find(resto)
@@ -120,6 +141,7 @@ object ExtractorNota {
             val adjunto = ADJUNTO.find(resto)
             if (adjunto != null) {
                 mencionaAdjunto = true
+                referenciaAnterior = false
                 i = saltarEspacios(norm, i + adjunto.value.length)
                 continue
             }
@@ -166,25 +188,19 @@ object ExtractorNota {
         val contenidoNorm = normalizar(contenido)
         if (SOLO_ADJUNTO.matches(contenidoNorm)) {
             mencionaAdjunto = true
+            referenciaAnterior = false
+            contenido = ""
+        } else if (REF_ANTERIOR.matches(contenidoNorm)) {
+            referenciaAnterior = true
             contenido = ""
         }
-        if (REFERENCIA_ANTERIOR.matches(contenidoNorm)) {
-            refiereAnterior = true
-            contenido = ""
+        if (contenido.isNotEmpty()) {
+            referenciaAnterior = false
         }
-        return PeticionGuardar(contenido, destino, mencionaAdjunto, refiereAnterior)
+        return PeticionGuardar(contenido, destino, mencionaAdjunto, referenciaAnterior)
     }
 
-    /** Limpia saludos introductorios de una respuesta de Iris antes de guardarla en un cuaderno. */
-    fun limpiarRespuestaParaNota(respuesta: String): String {
-        var limpio = respuesta.trim()
-        limpio = limpio.replace(
-            Regex("""^(?:¡?claro!?|por supuesto|aquí tienes|aqui tienes|con gusto|listo)[,.:!\s]*""", RegexOption.IGNORE_CASE),
-            ""
-        )
-        return limpio.trim()
-    }
-
+    /** Quita comillas, puntuación sobrante y "por favor" al final. */
     fun limpiar(texto: String): String {
         var t = texto.trim()
         t = t.trim(' ', '.', ',', ';', ':', '!', '?', '¿', '¡', '-', '"', '“', '”', '«', '»', '\'')
