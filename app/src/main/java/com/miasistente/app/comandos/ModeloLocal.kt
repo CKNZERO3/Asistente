@@ -19,11 +19,12 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.util.Locale
 
 /**
  * IA que corre en el propio teléfono (LiteRT-LM, procesador). Se encarga de las tareas ligeras
- * para no gastar la cuota de Gemini y recibe contexto compacto de [MemoriaLocal] para conocer
- * al usuario sin conexión.
+ * para no gastar la cuota de Gemini y recibe contexto compacto de [MemoriaLocal] e instrucciones
+ * personalizadas del usuario para conocerlo sin conexión.
  */
 class ModeloLocal(context: Context) {
 
@@ -32,6 +33,19 @@ class ModeloLocal(context: Context) {
     private val archivo = File(carpeta, NOMBRE_ARCHIVO)
 
     fun disponible(): Boolean = archivo.isFile && archivo.length() >= TAMANO_MINIMO
+
+    fun tamanoBytes(): Long = if (archivo.isFile) archivo.length() else 0L
+
+    fun tamanoLegible(): String {
+        val bytes = tamanoBytes()
+        if (bytes <= 0L) return "0 MB"
+        val mb = bytes / (1024.0 * 1024.0)
+        return if (mb >= 1024.0) {
+            String.format(Locale.US, "%.2f GB", mb / 1024.0)
+        } else {
+            String.format(Locale.US, "%.0f MB", mb)
+        }
+    }
 
     fun eliminar() {
         cerrarMotor()
@@ -140,9 +154,19 @@ const val INSTRUCCION_LOCAL =
     "Eres Iris, una asistente en español. Responde de forma breve, clara y directa. " +
         "Si no sabes algo, dilo; no inventes datos."
 
-/** Combina la instrucción base con el resumen compacto de la memoria local del usuario. */
-fun construirInstruccionLocal(contextoUsuario: String): String {
+/** Combina la instrucción base con las reglas personalizadas y el resumen de la memoria local. */
+fun construirInstruccionLocal(
+    contextoUsuario: String,
+    instruccionesPersonalizadas: String = ""
+): String {
+    val partes = mutableListOf(INSTRUCCION_LOCAL)
+    val reglas = instruccionesPersonalizadas.trim()
+    if (reglas.isNotEmpty()) {
+        partes += "Instrucciones personalizadas del usuario (aplícalas en tus respuestas):\n$reglas"
+    }
     val ctx = contextoUsuario.trim()
-    if (ctx.isEmpty()) return INSTRUCCION_LOCAL
-    return "$INSTRUCCION_LOCAL\n\nMemoria y preferencias del usuario (úsalas de forma natural si son relevantes):\n$ctx"
+    if (ctx.isNotEmpty()) {
+        partes += "Memoria y preferencias del usuario (úsalas de forma natural si son relevantes):\n$ctx"
+    }
+    return partes.joinToString("\n\n")
 }
