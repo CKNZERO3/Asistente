@@ -2,11 +2,15 @@ package com.miasistente.app.comandos
 
 import android.content.Context
 import android.content.Intent
+import android.provider.CalendarContract
 import android.provider.Settings
 import com.miasistente.app.BuildConfig
 import com.miasistente.app.accesibilidad.IrisAccessibilityService
 import com.miasistente.app.data.Ajustes
+import com.miasistente.app.data.InteligenciaConfig
+import com.miasistente.app.data.ModoEjecucionLocal
 import com.miasistente.app.data.PerfilUsuario
+import com.miasistente.app.data.ProveedorIA
 import com.miasistente.app.memoria.MemoriaLocal
 import kotlinx.coroutines.CancellationException
 
@@ -16,6 +20,7 @@ class ProcesadorComandos(context: Context) {
     private val parser = IntentParser()
     private val local = EjecutorLocal(appContext)
     private val gemini = GeminiClient()
+    private val clienteProveedores = ClienteProveedoresIA()
     private val habilidades = HabilidadesLocales()
     private val clima = ClimaOpenMeteo()
     private val modeloLocal = ModeloLocal(context)
@@ -23,6 +28,7 @@ class ProcesadorComandos(context: Context) {
     private val perfil = PerfilUsuario(appContext)
     private val notas = GestorNotas(appContext)
     private val memoria = MemoriaLocal.get(appContext)
+    private val inteligencia = InteligenciaConfig(appContext)
 
     suspend fun procesar(
         texto: String,
@@ -37,13 +43,15 @@ class ProcesadorComandos(context: Context) {
             return leerPantalla().also { registrarSiRespuestaUtil(it) }
         }
 
+        if (patronCalendario.containsMatchIn(normalizar(comando))) {
+            return abrirCalendario()
+        }
+
         return try {
             ComandosMemoria.interpretar(comando)?.let { accion ->
                 responderMemoria(accion)?.let { return it }
             }
 
-            // Interceptación prioritaria de guardado ("guárdalo en mi cuaderno", "en la app de notas", etc.)
-            // antes de pasar por el parser general o el LLM.
             ExtractorNota.analizar(comando)?.let { peticion ->
                 return notas.guardar(peticion)
             }
@@ -68,10 +76,6 @@ class ProcesadorComandos(context: Context) {
         }
     }
 
-    /**
-     * "Guarda esta imagen en el cuaderno Recetas" con adjuntos. Devuelve null si el texto no es
-     * una orden de guardar, y entonces la pantalla sigue con el flujo normal de adjuntos.
-     */
     suspend fun guardarAdjuntos(texto: String, adjuntos: List<AdjuntoNota>): ResultadoComando? {
         if (adjuntos.isEmpty()) return null
         val comando = quitarPalabraClave(texto, ajustes.palabraClave)
@@ -79,7 +83,6 @@ class ProcesadorComandos(context: Context) {
         return notas.guardar(peticion, adjuntos)
     }
 
-    /** Memoria esencial y seguimiento de notas: todo local, sin internet. */
     private suspend fun responderMemoria(accion: AccionMemoria): ResultadoComando? = when (accion) {
         AccionMemoria.NoSeGuardo -> notas.reintentarUltima()
         is AccionMemoria.Recordar -> {
@@ -113,11 +116,34 @@ class ProcesadorComandos(context: Context) {
                 .getString("user_name", null)
         }
         val contexto = memoria.construirContextoUsuario(consulta, nombreUsuario)
-        return construirInstruccionLocal(contexto)
+        val instrucciones = inteligencia.construirBloqueInstrucciones()
+        return construirInstruccionLocal(contexto, instrucciones)
     }
 
     private val patronLeerPantalla =
         Regex("""\b(?:lee|leer|leeme|lea)\b.*\b(?:pantalla|pagina|web|sitio|contenido)\b""")
+
+    private val patronCalendario =
+        Regex("""^(?:abre|abrir|muestra|ver|consulta|revisa)\s+(?:el\s+|mi\s+)?(?:calendario|agenda)$""")
+
+    private fun abrirCalendario(): ResultadoComando {
+        if (!inteligencia.conectorCalendario) {
+            return ResultadoComando(
+                false,
+                "El conector de Calendario está desactivado en Configuración → Inteligencia personalizada."
+            )
+        }
+        return try {
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                data = CalendarContract.CONTENT_URI.buildUpon().appendPath("time").build()
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            appContext.startActivity(intent)
+            ResultadoComando(true, "Abriendo tu calendario.")
+        } catch (_: Exception) {
+            ResultadoComando(false, "No encontré una aplicación de calendario disponible.")
+        }
+    }
 
     private fun quitarPalabraClave(texto: String, palabra: String): String {
         val original = texto.trim()
@@ -162,6 +188,28 @@ class ProcesadorComandos(context: Context) {
 
         val seleccion = IrisModelSelector.seleccionar(pregunta)
         val tiempoReal = IrisModelSelector.requiereTiempoReal(pregunta)
+
+        if (tiempoReal && !inteligencia.conectorBusquedaWeb) {
+            return ResultadoComando(
+                false,
+                "El conector de Búsqueda Web en tiempo real está desactivado en Configuración → Inteligencia personalizada."
+            )
+        }
+
+        val proveedor = inteligencia.proveedorActivo
+        if (proveedor == ProveedorIA.SOLO_LOCAL) {
+            if (!modeloLocal.disponible()) {
+                return ResultadoComando(
+                    false,
+                    "Tienes activo el modo «Solo Modelo Local», pero aún no has importado un archivo .litertlm."
+                )
+            }
+            return modeloLocal.generar(systemPromptLocal(pregunta), pregunta).fold(
+                onSuccess = { ResultadoComando(true, it) },
+                onFailure = { ResultadoComando(false, "El modelo local no pudo generar una respuesta.") }
+            )
+        }
+
         if (tiempoReal && !Conectividad.hayInternet(appContext)) {
             return ResultadoComando(
                 false,
@@ -169,13 +217,14 @@ class ProcesadorComandos(context: Context) {
             )
         }
 
-        // Si el usuario pregunta sobre algo guardado en su memoria local y no hay red (o es breve),
-        // el modelo local recibe el resumen FTS del usuario en su systemPrompt.
         val recuerdosRelevantes = if (!tiempoReal) memoria.buscar(pregunta, limite = 3) else emptyList()
-        val usarLocalPrimero = modeloLocal.disponible() &&
-            !tiempoReal &&
-            (seleccion.categoria == CategoriaTarea.LIGERA ||
-                (!Conectividad.hayInternet(appContext) && recuerdosRelevantes.isNotEmpty()))
+        val modoLocal = inteligencia.modoEjecucionLocal
+        val usarLocalPrimero = modeloLocal.disponible() && !tiempoReal && when (modoLocal) {
+            ModoEjecucionLocal.PRIORIZAR_LOCAL -> true
+            ModoEjecucionLocal.SOLO_NUBE -> false
+            ModoEjecucionLocal.HIBRIDO -> seleccion.categoria == CategoriaTarea.LIGERA ||
+                (!Conectividad.hayInternet(appContext) && recuerdosRelevantes.isNotEmpty())
+        }
 
         if (usarLocalPrimero) {
             modeloLocal.generar(systemPromptLocal(pregunta), pregunta)
@@ -210,7 +259,7 @@ class ProcesadorComandos(context: Context) {
         val peticion = "$indicacion («$nombre»):\n\n$contenido"
 
         val cabeEnLocal = contenido.length <= PoliticaArchivos.MAX_CARACTERES_LOCAL && modeloLocal.disponible()
-        if (cabeEnLocal) {
+        if (cabeEnLocal && inteligencia.modoEjecucionLocal != ModoEjecucionLocal.SOLO_NUBE) {
             modeloLocal.generar(systemPromptLocal(indicacion), peticion)
                 .onSuccess {
                     val res = ResultadoComando(true, it)
@@ -249,6 +298,32 @@ class ProcesadorComandos(context: Context) {
         modelo: String? = null,
         intentarLocalSiFalla: Boolean = true
     ): ResultadoComando {
+        val proveedor = inteligencia.proveedorActivo
+        val instruccionesExtra = inteligencia.construirBloqueInstrucciones()
+        val permitirWeb = inteligencia.conectorBusquedaWeb
+
+        // Si el usuario eligió un servidor local como Ollama, puede funcionar sin salida WAN
+        if (proveedor == ProveedorIA.OLLAMA_LOCAL) {
+            val resOllama = clienteProveedores.consultar(
+                proveedor = proveedor,
+                endpoint = inteligencia.endpointProveedor(proveedor),
+                modelo = inteligencia.modeloProveedor(proveedor),
+                apiKey = inteligencia.obtenerApiKey(proveedor),
+                pregunta = pregunta,
+                instruccionesExtra = instruccionesExtra,
+                permitirBusquedaWeb = false
+            )
+            resOllama.onSuccess { return ResultadoComando(true, it) }
+            if (intentarLocalSiFalla && modeloLocal.disponible()) {
+                modeloLocal.generar(systemPromptLocal(pregunta), pregunta)
+                    .onSuccess { return ResultadoComando(true, AVISO_SIN_NUBE + it) }
+            }
+            return ResultadoComando(
+                false,
+                resOllama.exceptionOrNull()?.message ?: "No pude conectar con tu servidor Ollama local."
+            )
+        }
+
         if (!Conectividad.hayInternet(appContext)) {
             if (intentarLocalSiFalla && modeloLocal.disponible()) {
                 modeloLocal.generar(systemPromptLocal(pregunta), pregunta)
@@ -257,9 +332,35 @@ class ProcesadorComandos(context: Context) {
             return ResultadoComando(false, "Ahora mismo no tengo conexión a internet.")
         }
 
+        if (proveedor == ProveedorIA.GEMINI_DIRECTO || proveedor == ProveedorIA.OPENAI_COMPATIBLE) {
+            val resExterno = clienteProveedores.consultar(
+                proveedor = proveedor,
+                endpoint = inteligencia.endpointProveedor(proveedor),
+                modelo = inteligencia.modeloProveedor(proveedor),
+                apiKey = inteligencia.obtenerApiKey(proveedor),
+                pregunta = pregunta,
+                instruccionesExtra = instruccionesExtra,
+                permitirBusquedaWeb = permitirWeb
+            )
+            resExterno.onSuccess { return ResultadoComando(true, it) }
+            if (intentarLocalSiFalla && modeloLocal.disponible()) {
+                modeloLocal.generar(systemPromptLocal(pregunta), pregunta)
+                    .onSuccess { return ResultadoComando(true, AVISO_SIN_NUBE + it) }
+            }
+            return ResultadoComando(
+                false,
+                mensajeAmigable(resExterno.exceptionOrNull() ?: IllegalStateException("Error en proveedor externo"))
+            )
+        }
+
         val elegido = modelo ?: IrisModelSelector.seleccionar(pregunta).modelo
 
-        return gemini.preguntar(pregunta, elegido).fold(
+        return gemini.preguntar(
+            pregunta = pregunta,
+            modeloSolicitado = elegido,
+            instruccionesExtra = instruccionesExtra,
+            permitirBusquedaWeb = permitirWeb
+        ).fold(
             onSuccess = { ResultadoComando(true, it) },
             onFailure = { errorNube ->
                 if (intentarLocalSiFalla && modeloLocal.disponible()) {
@@ -282,9 +383,9 @@ class ProcesadorComandos(context: Context) {
         error is HttpException && error.codigo == 429 ->
             "Estoy atendiendo muchas consultas en este momento. Inténtalo de nuevo en unos segundos."
         error is HttpException && error.codigo in 401..403 ->
-            "No tengo autorización para completar la consulta en este momento."
+            "No tengo autorización para completar la consulta. Revisa tu API Key en Inteligencia personalizada."
         error is HttpException && error.codigo == 404 ->
-            "Mi servicio de inteligencia no encontró un modelo disponible para esta solicitud."
+            "El servicio de inteligencia no encontró el modelo o ruta configurada."
         error is HttpException && error.codigo >= 500 ->
             "Tuve un problema temporal al preparar la respuesta. Inténtalo de nuevo."
         error is java.io.IOException && error.message?.contains("texto utilizable") == true ->
@@ -296,8 +397,6 @@ class ProcesadorComandos(context: Context) {
     private companion object {
         const val CONTEXTO_APPS = "app_abierta"
         const val AVISO_SIN_NUBE =
-            "No pude consultar a Gemini; esta respuesta viene de mi modelo local y puede tener errores.\n\n"
-        /** Última respuesta útil generada por Iris (compartida entre pantalla y servicio de voz). */
-        @Volatile var ultimoContenidoGenerado: String? = null
+            "No pude consultar a la nube; esta respuesta viene de mi modelo local y puede tener errores.\n\n"
     }
 }
