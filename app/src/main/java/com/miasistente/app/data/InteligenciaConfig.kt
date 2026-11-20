@@ -122,7 +122,7 @@ enum class ProveedorIA(
         descripcion = "Conecta directamente con Google AI Studio usando tu propia API Key.",
         requiereApiKey = true,
         requiereEndpoint = false,
-        endpointDefecto = "[https://generativelanguage.googleapis.com/v1beta/models](https://generativelanguage.googleapis.com/v1beta/models)",
+        endpointDefecto = "https://generativelanguage.googleapis.com/v1beta/models",
         modeloDefecto = "gemini-2.5-flash"
     ),
     OPENAI_COMPATIBLE(
@@ -131,7 +131,7 @@ enum class ProveedorIA(
         descripcion = "Cualquier API compatible con el formato OpenAI Chat Completions.",
         requiereApiKey = true,
         requiereEndpoint = true,
-        endpointDefecto = "[https://api.openai.com/v1/chat/completions](https://api.openai.com/v1/chat/completions)",
+        endpointDefecto = "https://api.openai.com/v1/chat/completions",
         modeloDefecto = "gpt-4o-mini"
     ),
     OLLAMA_LOCAL(
@@ -140,7 +140,7 @@ enum class ProveedorIA(
         descripcion = "Servidor local o en red doméstica compatible con OpenAI.",
         requiereApiKey = false,
         requiereEndpoint = true,
-        endpointDefecto = "[http://127.0.0.1:11434/v1/chat/completions](http://127.0.0.1:11434/v1/chat/completions)",
+        endpointDefecto = "http://127.0.0.1:11434/v1/chat/completions",
         modeloDefecto = "gemma3:4b"
     ),
     SOLO_LOCAL(
