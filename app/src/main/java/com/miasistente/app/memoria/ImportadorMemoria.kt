@@ -3,142 +3,166 @@ package com.miasistente.app.memoria
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
+import com.miasistente.app.comandos.LecturaArchivo
+import com.miasistente.app.comandos.PoliticaArchivos
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.ByteArrayOutputStream
 
+/** Resultado de importar un archivo de memoria del usuario. */
 data class ResultadoImportacionMemoria(
     val exito: Boolean,
-    val mensaje: String,
-    val cantidadImportada: Int = 0
+    val nuevos: Int,
+    val mensaje: String
 )
 
-object ImportadorMemoria {
+/**
+ * Parsea archivos de contexto/memoria del usuario (.txt, .md, .json, .csv) e indexa sus hechos
+ * en [MemoriaLocal] (SQLite + FTS4) para enriquecer al modelo local (Gemma 3 1B) sin internet.
+ */
+class ImportadorMemoria(context: Context) {
 
-    private const val MAX_BYTES = 500 * 1024
-    private const val MAX_RECUERDOS_POR_ARCHIVO = 250
+    private val appContext = context.applicationContext
+    private val memoria = MemoriaLocal.get(appContext)
 
-    suspend fun importarDesdeUri(context: Context, uri: Uri): ResultadoImportacionMemoria =
-        withContext(Dispatchers.IO) {
-            try {
-                val resolver = context.contentResolver
-                var nombre = uri.lastPathSegment?.substringAfterLast('/') ?: "memoria.txt"
-                resolver.query(uri, null, null, null, null)?.use { cursor ->
-                    if (cursor.moveToFirst()) {
-                        val idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                        if (idx >= 0) cursor.getString(idx)?.let { nombre = it }
-                    }
-                }
-
-                val bytes = resolver.openInputStream(uri)?.use { input ->
-                    val out = ByteArrayOutputStream()
-                    val buf = ByteArray(8 * 1024)
-                    var total = 0
-                    while (total <= MAX_BYTES) {
-                        val leidos = input.read(buf, 0, minOf(buf.size, MAX_BYTES + 1 - total))
-                        if (leidos < 0) break
-                        out.write(buf, 0, leidos)
-                        total += leidos
-                    }
-                    out.toByteArray()
-                } ?: return@withContext ResultadoImportacionMemoria(false, "No pude abrir el archivo seleccionado.")
-
-                if (bytes.isEmpty()) {
-                    return@withContext ResultadoImportacionMemoria(false, "El archivo «$nombre» está vacío.")
-                }
-                if (bytes.size > MAX_BYTES) {
-                    return@withContext ResultadoImportacionMemoria(false, "El archivo supera el límite de 500 KB.")
-                }
-
-                val crudo = String(bytes, Charsets.UTF_8)
-                if (crudo.count { it == '\uFFFD' } > crudo.length / 15) {
-                    return@withContext ResultadoImportacionMemoria(
-                        false,
-                        "Formato no legible. Usa archivos .txt, .md, .json o .csv."
-                    )
-                }
-
-                val candidatos = extraerRecuerdos(crudo, nombre).take(MAX_RECUERDOS_POR_ARCHIVO)
-                if (candidatos.isEmpty()) {
-                    return@withContext ResultadoImportacionMemoria(
-                        false,
-                        "No encontré recuerdos o notas válidas en «$nombre»."
-                    )
-                }
-
-                val nuevos = MemoriaLocal.get(context).recordarLote(candidatos)
-                val msg = when {
-                    nuevos > 0 -> "Se importaron $nuevos recuerdo(s) desde «$nombre»."
-                    else -> "Todos los recuerdos de «$nombre» ya estaban guardados en Iris."
-                }
-                ResultadoImportacionMemoria(true, msg, nuevos)
-            } catch (e: Exception) {
-                ResultadoImportacionMemoria(false, "No pude importar la memoria: ${e.message ?: "error de lectura"}")
-            }
+    suspend fun importarDesdeUri(uri: Uri): ResultadoImportacionMemoria = withContext(Dispatchers.IO) {
+        val (nombre, tamano) = metadatos(uri)
+        val mime = appContext.contentResolver.getType(uri)
+        val lectura = PoliticaArchivos.leer(appContext.contentResolver, uri, nombre, mime, tamano)
+        when (lectura) {
+            is LecturaArchivo.Rechazado -> ResultadoImportacionMemoria(false, 0, lectura.motivo)
+            is LecturaArchivo.Texto -> importarTexto(lectura.contenido, nombre)
         }
-
-    internal fun extraerRecuerdos(contenido: String, nombreArchivo: String): List<String> {
-        val trim = contenido.trim()
-        if (nombreArchivo.endsWith(".json", ignoreCase = true) || trim.startsWith("{") || trim.startsWith("[")) {
-            val desdeJson = extraerDesdeJson(trim)
-            if (desdeJson.isNotEmpty()) return desdeJson
-        }
-        return extraerDesdeTextoPlano(trim)
     }
 
-    private fun extraerDesdeJson(jsonText: String): List<String> {
-        val salida = mutableListOf<String>()
-        val clavesTexto = listOf("fact", "hecho", "memory", "memoria", "note", "nota", "content", "text", "valor", "title")
+    suspend fun importarTexto(contenido: String, nombreArchivo: String = "memoria.txt"): ResultadoImportacionMemoria {
+        val hechos = parsearContenido(contenido, nombreArchivo)
+        if (hechos.isEmpty()) {
+            return ResultadoImportacionMemoria(
+                exito = false,
+                nuevos = 0,
+                mensaje = "No encontré datos o recuerdos utilizables en «$nombreArchivo»."
+            )
+        }
+        val insertados = memoria.importarHechos(hechos)
+        return if (insertados > 0) {
+            ResultadoImportacionMemoria(
+                exito = true,
+                nuevos = insertados,
+                mensaje = "Se importaron $insertados recuerdos a la memoria local de Iris."
+            )
+        } else {
+            ResultadoImportacionMemoria(
+                exito = true,
+                nuevos = 0,
+                mensaje = "Los datos de «$nombreArchivo» ya estaban guardados en la memoria de Iris."
+            )
+        }
+    }
 
-        fun inspeccionar(nodo: Any?) {
-            when (nodo) {
+    private fun metadatos(uri: Uri): Pair<String, Long?> {
+        var nombre = uri.lastPathSegment?.substringAfterLast('/') ?: "memoria.txt"
+        var tamano: Long? = null
+        runCatching {
+            appContext.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val iNombre = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    if (iNombre >= 0) cursor.getString(iNombre)?.let { nombre = it }
+                    val iTamano = cursor.getColumnIndex(OpenableColumns.SIZE)
+                    if (iTamano >= 0 && !cursor.isNull(iTamano)) tamano = cursor.getLong(iTamano)
+                }
+            }
+        }
+        return nombre to tamano
+    }
+
+    companion object {
+        private const val MAX_ITEMS = 120
+        private const val MAX_LARGO_ITEM = 260
+
+        /** Extrae hechos limpios desde JSON, Markdown, CSV o texto plano. */
+        fun parsearContenido(raw: String, nombreArchivo: String = ""): List<String> {
+            val texto = raw.trim()
+            if (texto.isEmpty()) return emptyList()
+
+            val ext = nombreArchivo.substringAfterLast('.', "").lowercase()
+            if (ext == "json" || texto.startsWith("[") || texto.startsWith("{")) {
+                parsearJson(texto)?.let { if (it.isNotEmpty()) return it }
+            }
+
+            return texto.lines()
+                .map { linea ->
+                    linea.trim()
+                        .removePrefix("- ")
+                        .removePrefix("* ")
+                        .removePrefix("• ")
+                        .replace(Regex("""^\d+[.)]\s+"""), "")
+                        .replace(Regex("""^#+\s+"""), "")
+                        .trim()
+                }
+                .filter { it.length >= 4 && !it.startsWith("---") && !it.startsWith("```") }
+                .map { it.take(MAX_LARGO_ITEM) }
+                .distinct()
+                .take(MAX_ITEMS)
+        }
+
+        private fun parsearJson(texto: String): List<String>? = try {
+            val salida = mutableListOf<String>()
+            when {
+                texto.startsWith("[") -> {
+                    val arr = JSONArray(texto)
+                    for (i in 0 until arr.length()) {
+                        extraerDeElementoJson(arr.get(i), salida)
+                    }
+                }
+                texto.startsWith("{") -> {
+                    val obj = JSONObject(texto)
+                    val clavesContenedor = listOf("memories", "memoria", "hechos", "facts", "items", "datos", "perfil")
+                    val claveEncontrada = clavesContenedor.firstOrNull { obj.has(it) }
+                    if (claveEncontrada != null) {
+                        extraerDeElementoJson(obj.get(claveEncontrada), salida)
+                    } else {
+                        extraerDeElementoJson(obj, salida)
+                    }
+                }
+            }
+            salida.map { it.trim().take(MAX_LARGO_ITEM) }
+                .filter { it.length >= 4 }
+                .distinct()
+                .take(MAX_ITEMS)
+        } catch (_: Exception) {
+            null
+        }
+
+        private fun extraerDeElementoJson(elemento: Any?, destino: MutableList<String>) {
+            when (elemento) {
+                is String -> destino.add(elemento)
                 is JSONArray -> {
-                    for (i in 0 until nodo.length()) inspeccionar(nodo.opt(i))
+                    for (i in 0 until elemento.length()) {
+                        extraerDeElementoJson(elemento.get(i), destino)
+                    }
                 }
                 is JSONObject -> {
-                    for (clave in clavesTexto) {
-                        val valor = nodo.optString(clave, "").trim()
-                        if (valor.length in 3..400) salida.add(limpiarLinea(valor))
-                    }
-                    val keys = nodo.keys()
-                    while (keys.hasNext()) {
-                        val k = keys.next()
-                        if (k !in clavesTexto) {
-                            val sub = nodo.opt(k)
-                            if (sub is JSONArray || sub is JSONObject) inspeccionar(sub)
+                    val clavesTexto = listOf("valor", "value", "fact", "hecho", "memory", "memoria", "text", "contenido", "content")
+                    val directa = clavesTexto.firstOrNull { elemento.has(it) && elemento.optString(it).isNotBlank() }
+                    if (directa != null) {
+                        destino.add(elemento.optString(directa))
+                    } else {
+                        val keys = elemento.keys()
+                        while (keys.hasNext()) {
+                            val k = keys.next()
+                            val v = elemento.opt(k)
+                            if (v is String || v is Number || v is Boolean) {
+                                val s = v.toString().trim()
+                                if (s.isNotEmpty()) destino.add("$k: $s")
+                            } else {
+                                extraerDeElementoJson(v, destino)
+                            }
                         }
                     }
                 }
-                is String -> {
-                    val s = limpiarLinea(nodo)
-                    if (s.length in 3..400) salida.add(s)
-                }
             }
         }
-
-        runCatching {
-            if (jsonText.startsWith("[")) inspeccionar(JSONArray(jsonText))
-            else if (jsonText.startsWith("{")) inspeccionar(JSONObject(jsonText))
-        }
-        return salida.distinct()
     }
-
-    private fun extraerDesdeTextoPlano(texto: String): List<String> {
-        return texto.lines()
-            .map { limpiarLinea(it) }
-            .filter { it.length in 4..400 }
-            .filterNot { it.startsWith("#") && it.length < 6 }
-            .distinct()
-    }
-
-    private fun limpiarLinea(linea: String): String =
-        linea.trim()
-            .removePrefix("- ")
-            .removePrefix("* ")
-            .removePrefix("• ")
-            .replace(Regex("""^#+\s*"""), "")
-            .replace(Regex("""\s+"""), " ")
-            .trim()
 }
