@@ -233,13 +233,13 @@ class ClienteProveedoresIA {
 
         fun normalizarBaseGemini(raw: String): String {
             val limpia = raw.trim().trimEnd('/')
-            return if (limpia.isBlank()) "[https://generativelanguage.googleapis.com/v1beta/models](https://generativelanguage.googleapis.com/v1beta/models)"
+            return if (limpia.isBlank()) "https://generativelanguage.googleapis.com/v1beta/models"
             else limpia
         }
 
         fun normalizarEndpointOpenAI(raw: String): String {
             val limpia = raw.trim().trimEnd('/')
-            if (limpia.isBlank()) return "[https://api.openai.com/v1/chat/completions](https://api.openai.com/v1/chat/completions)"
+            if (limpia.isBlank()) return "https://api.openai.com/v1/chat/completions"
             return if (limpia.endsWith("/chat/completions")) limpia
             else if (limpia.endsWith("/v1")) "$limpia/chat/completions"
             else limpia
