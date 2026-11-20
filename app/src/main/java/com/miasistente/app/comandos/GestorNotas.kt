@@ -9,6 +9,8 @@ import android.net.Uri
 import android.os.Build
 import android.util.Log
 import androidx.core.content.FileProvider
+import com.miasistente.app.data.DestinoNotasPredeterminado
+import com.miasistente.app.data.InteligenciaConfig
 import com.miasistente.app.memoria.AprendizajeHabitos
 import com.miasistente.app.memoria.ClasificadorCuadernos
 import com.miasistente.app.memoria.Cuaderno
@@ -25,13 +27,14 @@ data class AdjuntoNota(val uri: String, val nombre: String, val mime: String?) {
  * Guarda notas donde el usuario quiere:
  * - en un cuaderno de Iris Notebook (por nombre, por tema o creando uno nuevo), sin red;
  * - en una app externa (Keep, Samsung Notes…) mediante el Intent estándar de compartir;
- * - si no dijo dónde, según su hábito aprendido, o con el selector del sistema mientras aprende;
+ * - respetando la preferencia de conectores de [InteligenciaConfig] y el hábito aprendido;
  * - si el usuario dice "guárdalo" o "anota eso", recupera [ultimoContenidoGenerado] de memoria.
  */
 class GestorNotas(context: Context) {
 
     private val appContext = context.applicationContext
     private val memoria = MemoriaLocal.get(appContext)
+    private val inteligencia = InteligenciaConfig(appContext)
 
     /** Última nota guardada, para responder a "no se guardó" sin perder el contexto. */
     data class UltimaNota(
@@ -62,7 +65,7 @@ class GestorNotas(context: Context) {
             when (val destino = peticion.destino) {
                 is DestinoNota.Cuaderno -> guardarEnCuaderno(destino.nombre, contenido, adjuntos)
                 is DestinoNota.App -> enviarAAppNombrada(destino.nombre, contenido, adjuntos)
-                DestinoNota.SinEspecificar -> guardarSegunHabito(contenido, adjuntos)
+                DestinoNota.SinEspecificar -> guardarSegunPreferencia(contenido, adjuntos)
             }
         } catch (e: CancellationException) {
             throw e
@@ -138,7 +141,22 @@ class GestorNotas(context: Context) {
         return memoria.cuadernos().firstOrNull { it.id == id }
     }
 
-    // --- Apps externas -------------------------------------------------------------------
+    // --- Apps externas y preferencia de conectores ---------------------------------------
+
+    private suspend fun guardarSegunPreferencia(contenido: String, adjuntos: List<AdjuntoNota>): ResultadoComando {
+        return when (inteligencia.destinoNotas) {
+            DestinoNotasPredeterminado.CUADERNO -> guardarEnCuaderno(null, contenido, adjuntos)
+            DestinoNotasPredeterminado.EXTERNO -> {
+                if (inteligencia.conectorKeep) {
+                    resolverApp("keep")?.let { keep ->
+                        enviarAPaquete(keep.paquete, keep.etiqueta, contenido, adjuntos)?.let { return it }
+                    }
+                }
+                abrirSelector(contenido, adjuntos)
+            }
+            DestinoNotasPredeterminado.AUTO -> guardarSegunHabito(contenido, adjuntos)
+        }
+    }
 
     private suspend fun guardarSegunHabito(contenido: String, adjuntos: List<AdjuntoNota>): ResultadoComando {
         val preferida = AprendizajeHabitos.decidir(memoria.pesosHabito(CONTEXTO_DESTINO))
@@ -146,6 +164,9 @@ class GestorNotas(context: Context) {
             preferida == OPCION_CUADERNO -> guardarEnCuaderno(null, contenido, adjuntos)
             preferida != null && preferida.startsWith(PREFIJO_APP) -> {
                 val paquete = preferida.removePrefix(PREFIJO_APP)
+                if (paquete == PAQUETE_KEEP && !inteligencia.conectorKeep) {
+                    return abrirSelector(contenido, adjuntos)
+                }
                 enviarAPaquete(paquete, etiquetaDe(appContext, paquete) ?: paquete, contenido, adjuntos)
                     ?: abrirSelector(contenido, adjuntos)
             }
@@ -159,10 +180,16 @@ class GestorNotas(context: Context) {
         adjuntos: List<AdjuntoNota>
     ): ResultadoComando {
         val buscado = normalizar(nombre).trim()
+        if ("keep" in buscado && !inteligencia.conectorKeep) {
+            val copia = guardarEnCuaderno(null, contenido, adjuntos)
+            return ResultadoComando(
+                copia.exito,
+                "El conector de Google Keep está desactivado en Inteligencia personalizada, así que lo guardé en Iris Notebook: ${copia.mensaje.replaceFirstChar { it.lowercase() }}"
+            )
+        }
+
         val app = resolverApp(nombre)
 
-        // Si el usuario pidió genéricamente "en la app de notas" y no hay una única app llamada "Notas",
-        // abrimos el selector externo de Android en lugar de desviarlo al cuaderno interno.
         if (app == null && buscado == "notas") {
             return abrirSelector(contenido, adjuntos)
         }
@@ -299,11 +326,9 @@ class GestorNotas(context: Context) {
         const val PREFIJO_APP = "app:"
         private const val PAQUETE_KEEP = "com.google.android.keep"
 
-        /** Compartida entre la pantalla y el servicio de voz (cada uno tiene su procesador). */
         @Volatile var ultima: UltimaNota? = null
             private set
 
-        /** Última respuesta o texto generado por Iris para poder decir "guárdalo en mi cuaderno". */
         @Volatile var ultimoContenidoGenerado: String? = null
             private set
 
