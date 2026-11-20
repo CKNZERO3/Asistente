@@ -1,0 +1,45 @@
+name: Sincronizar estado del repo a Google Drive
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sync-drive:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 10
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Instalar rclone
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq rclone
+
+      - name: Configurar acceso a Google Drive
+        run: |
+          mkdir -p ~/.config/rclone
+          printf '%s' "${{ secrets.RCLONE_CONF }}" > ~/.config/rclone/rclone.conf
+
+      - name: Recuperar log histórico previo de Drive (si existe)
+        run: |
+          mkdir -p dist-mirror
+          rclone copyto "gdrive:Iris_Repo_Mirror/changelog-inteligente.md" "dist-mirror/changelog-inteligente.md" || true
+
+      - name: Generar snapshot puro de código y log con fecha y hora
+        run: node scripts/generar-snapshot.mjs
+
+      - name: Subir y actualizar archivos en Google Drive
+        run: |
+          rclone copyto "dist-mirror/repo-actual.xml" "gdrive:Iris_Repo_Mirror/repo-actual.xml"
+          rclone copyto "dist-mirror/changelog-inteligente.md" "gdrive:Iris_Repo_Mirror/changelog-inteligente.md"
