@@ -104,6 +104,14 @@ class MemoriaLocal private constructor(context: Context) {
         db.writableDatabase.delete("habitos", "opcion = ? AND contexto LIKE 'tema:%'", arrayOf(id.toString()))
     }
 
+    suspend fun eliminarEntrada(id: Long) = withContext(HILO) {
+        transaccion { w ->
+            w.execSQL("DELETE FROM entradas_fts WHERE rowid = ?", arrayOf<Any>(id))
+            w.delete("entradas", "id = ?", arrayOf(id.toString()))
+        }
+        cacheCuadernos = null
+    }
+
     /** Cuaderno por nombre: igual, o empieza igual ("receta" → "Recetas"). */
     suspend fun buscarCuadernoPorNombre(nombre: String): Cuaderno? {
         val buscado = ClasificadorCuadernos.normalizarTexto(nombre).trim()
