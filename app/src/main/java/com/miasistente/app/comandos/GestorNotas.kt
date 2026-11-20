@@ -25,7 +25,8 @@ data class AdjuntoNota(val uri: String, val nombre: String, val mime: String?) {
  * Guarda notas donde el usuario quiere:
  * - en un cuaderno de Iris Notebook (por nombre, por tema o creando uno nuevo), sin red;
  * - en una app externa (Keep, Samsung Notes…) mediante el Intent estándar de compartir;
- * - si no dijo dónde, según su hábito aprendido, o con el selector del sistema mientras aprende.
+ * - si no dijo dónde, según su hábito aprendido, o con el selector del sistema mientras aprende;
+ * - si el usuario dice "guárdalo" o "anota eso", recupera [ultimoContenidoGenerado] de memoria.
  */
 class GestorNotas(context: Context) {
 
@@ -43,7 +44,13 @@ class GestorNotas(context: Context) {
     private data class AppDestino(val paquete: String, val etiqueta: String)
 
     suspend fun guardar(peticion: PeticionGuardar, adjuntos: List<AdjuntoNota> = emptyList()): ResultadoComando {
-        val contenido = peticion.contenido.trim()
+        var contenido = peticion.contenido.trim()
+        if (contenido.isEmpty() && adjuntos.isEmpty() && !peticion.mencionaAdjunto) {
+            val previo = ultimoContenidoGenerado?.trim().orEmpty()
+            if (previo.isNotEmpty()) {
+                contenido = previo
+            }
+        }
         if (contenido.isEmpty() && adjuntos.isEmpty()) {
             return ResultadoComando(
                 false,
@@ -117,7 +124,6 @@ class GestorNotas(context: Context) {
             )
         }
 
-        // Aprendizaje en segundo plano: no espera a la base de datos.
         memoria.registrarHabito(CONTEXTO_DESTINO, OPCION_CUADERNO)
         if (tema != null) memoria.registrarHabito(contextoTema(tema), cuaderno.id.toString())
 
@@ -126,7 +132,6 @@ class GestorNotas(context: Context) {
         return ResultadoComando(true, "Guardé ${describir(contenido, adjuntos)} $donde.")
     }
 
-    /** "¿A qué cuaderno suele mandar este tipo de contenido?" */
     private suspend fun cuadernoPorHabito(tema: String?): Cuaderno? {
         tema ?: return null
         val id = AprendizajeHabitos.decidir(memoria.pesosHabito(contextoTema(tema)))?.toLongOrNull() ?: return null
@@ -153,7 +158,15 @@ class GestorNotas(context: Context) {
         contenido: String,
         adjuntos: List<AdjuntoNota>
     ): ResultadoComando {
+        val buscado = normalizar(nombre).trim()
         val app = resolverApp(nombre)
+
+        // Si el usuario pidió genéricamente "en la app de notas" y no hay una única app llamada "Notas",
+        // abrimos el selector externo de Android en lugar de desviarlo al cuaderno interno.
+        if (app == null && buscado == "notas") {
+            return abrirSelector(contenido, adjuntos)
+        }
+
         if (app == null) {
             val copia = guardarEnCuaderno(null, contenido, adjuntos)
             return ResultadoComando(
@@ -165,7 +178,6 @@ class GestorNotas(context: Context) {
             ?: ResultadoComando(false, "No pude abrir ${app.etiqueta} para guardar la nota.")
     }
 
-    /** Envía directo a la app (sin selector). Null si Android no lo permitió. */
     private fun enviarAPaquete(
         paquete: String,
         etiqueta: String,
@@ -184,7 +196,6 @@ class GestorNotas(context: Context) {
         null
     }
 
-    /** Selector del sistema mientras Iris aprende qué app prefieres. */
     private fun abrirSelector(contenido: String, adjuntos: List<AdjuntoNota>): ResultadoComando = try {
         val aviso = PendingIntent.getBroadcast(
             appContext,
@@ -227,7 +238,6 @@ class GestorNotas(context: Context) {
         return intent
     }
 
-    /** Los adjuntos viven en archivos privados de Iris: se comparten con FileProvider. */
     private fun uriCompartible(uri: String): Uri? = try {
         val parsed = Uri.parse(uri)
         if (parsed.scheme == "file") {
@@ -256,8 +266,14 @@ class GestorNotas(context: Context) {
             .distinctBy { it.paquete }
         val buscado = normalizar(nombre).trim()
 
-        // El nombre visible de Keep cambia según versión e idioma; su paquete no.
         if ("keep" in buscado) candidatas.firstOrNull { it.paquete == PAQUETE_KEEP }?.let { return it }
+
+        if (buscado == "notas") {
+            return candidatas.firstOrNull {
+                val et = normalizar(it.etiqueta)
+                et == "notas" || "notes" in et || "bloc de notas" in et || it.paquete == PAQUETE_KEEP
+            }
+        }
 
         return candidatas.firstOrNull { normalizar(it.etiqueta) == buscado }
             ?: candidatas.firstOrNull { normalizar(it.etiqueta).startsWith(buscado) }
@@ -287,9 +303,19 @@ class GestorNotas(context: Context) {
         @Volatile var ultima: UltimaNota? = null
             private set
 
+        /** Última respuesta o texto generado por Iris para poder decir "guárdalo en mi cuaderno". */
+        @Volatile var ultimoContenidoGenerado: String? = null
+            private set
+
+        fun registrarContenidoGenerado(texto: String) {
+            val limpio = texto.trim()
+            if (limpio.isNotEmpty()) {
+                ultimoContenidoGenerado = limpio
+            }
+        }
+
         fun contextoTema(tema: String) = "tema:$tema"
 
-        /** Lo llama [EleccionAppReceiver] cuando el usuario elige una app en el selector. */
         fun registrarEleccion(context: Context, paquete: String) {
             if (paquete == context.packageName) return
             MemoriaLocal.get(context).registrarHabito(CONTEXTO_DESTINO, PREFIJO_APP + paquete)
