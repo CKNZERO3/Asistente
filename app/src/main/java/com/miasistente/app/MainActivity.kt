@@ -65,6 +65,7 @@ import java.util.Date
 import java.util.Locale
 import com.miasistente.app.memoria.ImportadorMemoria
 
+
 class MainActivity : ComponentActivity() {
 
     private lateinit var procesador: ProcesadorComandos
@@ -124,6 +125,12 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.GetContent()
     ) { uri ->
         if (uri != null) importarModeloLocal(uri)
+    }
+
+    private val pickMemoryFile = registerForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri ->
+        if (uri != null) importarArchivoMemoria(uri)
     }
 
     private val pickMemoryFile = registerForActivityResult(
@@ -637,6 +644,12 @@ class MainActivity : ComponentActivity() {
             )
         }
     }
+    private fun importarArchivoMemoria(uri: Uri) {
+        lifecycleScope.launch {
+            val resultado = ImportadorMemoria(applicationContext).importarDesdeUri(uri)
+            aviso(resultado.mensaje)
+        }
+    }
 
     private fun tienePermisoUbicacion(): Boolean {
         val fine = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) ==
@@ -792,6 +805,7 @@ class MainActivity : ComponentActivity() {
             "search" -> aviso("Búsqueda próximamente")
             "gallery" -> aviso("Galería próximamente")
             "import" -> pickMemoryFile.launch(arrayOf("text/*", "application/json"))
+            "import_model" -> pickModel.launch("*/*")
         }
     }
         
