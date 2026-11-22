@@ -60,7 +60,6 @@ class DespachadorUtilidades(
                 if (res.exito) huboExito = true
                 if (res.mensaje.isNotBlank()) confirmaciones.add(res.mensaje.trim())
             } else if (llamada.tool == RegistroUtilidades.TOOL_WEB) {
-                // Si no es clima directo, delegar búsqueda web a la capa conectada
                 val q = llamada.args["query"].orEmpty().ifBlank { comandoOriginal }
                 return ResultadoDespachoHibrido(
                     manejadoLocalmente = false,
@@ -129,8 +128,8 @@ class DespachadorUtilidades(
             } else {
                 val destino = when {
                     destinoRaw.equals("externa", ignoreCase = true) ||
-                        destinoRaw.contains("keep", ignoreCase = true) -> DestinoNota.AppExterna()
-                    destinoRaw.isNotBlank() -> DestinoNota.CuadernoExplicito(destinoRaw)
+                        destinoRaw.contains("keep", ignoreCase = true) -> DestinoNota.App("keep")
+                    destinoRaw.isNotBlank() -> DestinoNota.Cuaderno(destinoRaw)
                     else -> DestinoNota.SinEspecificar
                 }
                 notas.guardar(PeticionGuardar(contenido, destino))
