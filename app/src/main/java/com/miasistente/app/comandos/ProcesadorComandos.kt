@@ -29,6 +29,7 @@ class ProcesadorComandos(context: Context) {
     private val notas = GestorNotas(appContext)
     private val memoria = MemoriaLocal.get(appContext)
     private val inteligencia = InteligenciaConfig(appContext)
+    private val despachador = DespachadorUtilidades(parser, local, notas, memoria, clima)
 
     suspend fun procesar(
         texto: String,
@@ -56,16 +57,41 @@ class ProcesadorComandos(context: Context) {
                 return notas.guardar(peticion)
             }
 
+            // Nivel 0: comandos deterministas instantáneos (0 ms, 0 tokens)
             when (val intencion = parser.parsear(comando)) {
-                is Intencion.ConsultaIA -> responderConsulta(intencion.pregunta).also {
-                    registrarSiRespuestaUtil(it)
-                }
                 is Intencion.CrearNota -> notas.guardar(
                     ExtractorNota.analizar(comando)
                         ?: PeticionGuardar(ExtractorNota.limpiar(intencion.contenido), DestinoNota.SinEspecificar)
                 )
                 is Intencion.AbrirAplicacion -> local.ejecutar(intencion).also {
                     if (it.exito) memoria.registrarHabito(CONTEXTO_APPS, normalizar(intencion.nombreApp))
+                }
+                is Intencion.ConsultaIA -> {
+                    habilidades.responder(intencion.pregunta)?.let {
+                        return ResultadoComando(true, it)
+                    }
+                    habilidades.peticionClima(intencion.pregunta)?.let {
+                        return consultarClima(it)
+                    }
+
+                    // Nivel 1: enrutador de utilidades local (Tool-Calling con Gemma 3)
+                    if (modeloLocal.disponible() && inteligencia.modoEjecucionLocal != ModoEjecucionLocal.SOLO_NUBE) {
+                        val contexto = memoria.construirContextoUsuario(comando, perfil.nombre)
+                        val promptTools = RegistroUtilidades.generarPromptCompactoLocal(contexto)
+                        val salidaJson = modeloLocal.generar(promptTools, comando).getOrDefault("")
+                        val llamadas = RegistroUtilidades.parsearLlamadasLocales(salidaJson)
+                        val despacho = despachador.despachar(comando, llamadas)
+
+                        if (despacho.manejadoLocalmente && despacho.resultado != null) {
+                            return despacho.resultado.also { registrarSiRespuestaUtil(it) }
+                        }
+                        val consultaFinal = despacho.escalarANubePrompt ?: intencion.pregunta
+                        return responderConsulta(consultaFinal).also { registrarSiRespuestaUtil(it) }
+                    }
+
+                    responderConsulta(intencion.pregunta).also {
+                        registrarSiRespuestaUtil(it)
+                    }
                 }
                 else -> local.ejecutar(intencion)
             }
