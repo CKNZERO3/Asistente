@@ -171,11 +171,12 @@ class DespachadorUtilidades(
 
         RegistroUtilidades.TOOL_WEB -> {
             val q = llamada.args["query"].orEmpty().ifBlank { comandoOriginal }
-            if (q.contains("clima", ignoreCase = true) || q.contains("temperatura", ignoreCase = true)) {
-                val infoClima = runCatching { clima.obtenerClimaActual(q) }.getOrNull()
-                if (!infoClima.isNullOrBlank()) ResultadoComando(true, infoClima) else null
+            val ciudad = HabilidadesLocales().peticionClima(q)?.ciudad
+            if (!ciudad.isNullOrBlank()) {
+                val datos = runCatching { clima.consultar(ciudad) }.getOrNull()
+                if (datos != null) ResultadoComando(true, ClimaTexto.resumen(datos)) else null
             } else {
-                null // Delega a búsqueda web en nube
+                null // Delega búsqueda web en tiempo real a la nube
             }
         }
 
