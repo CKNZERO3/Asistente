@@ -27,9 +27,32 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y -qq rclone
 
       - name: Configurar acceso a Google Drive
+        env:
+          RCLONE_CONF_RAW: ${{ secrets.RCLONE_CONF }}
         run: |
+          if [ -z "$RCLONE_CONF_RAW" ]; then
+            echo "::error::Falta el secreto RCLONE_CONF en GitHub (Settings > Secrets and variables > Actions > Repository secrets)."
+            exit 1
+          fi
+
           mkdir -p ~/.config/rclone
-          printf '%s' "${{ secrets.RCLONE_CONF }}" > ~/.config/rclone/rclone.conf
+          CLEAN_CONF=$(printf '%s' "$RCLONE_CONF_RAW" | tr -d '\r')
+
+          if printf '%s' "$CLEAN_CONF" | grep -q '^[[:space:]]*{'; then
+            rclone config create gdrive drive token="$CLEAN_CONF" --non-interactive >/dev/null
+          else
+            printf '%s\n' "$CLEAN_CONF" > ~/.config/rclone/rclone.conf
+            if ! grep -q '^\[gdrive\]' ~/.config/rclone/rclone.conf && grep -q '^\[.*\]' ~/.config/rclone/rclone.conf; then
+              sed -i '0,/^\[.*\]/s//\[gdrive\]/' ~/.config/rclone/rclone.conf
+            fi
+          fi
+
+          if ! grep -q '^\[gdrive\]' ~/.config/rclone/rclone.conf; then
+            echo "::error::El secreto RCLONE_CONF no tiene un formato válido de rclone (debe empezar por [gdrive] o ser el JSON del token)."
+            exit 1
+          fi
+
+          rclone mkdir "gdrive:Iris_Repo_Mirror"
 
       - name: Recuperar log histórico previo de Drive (si existe)
         run: |
