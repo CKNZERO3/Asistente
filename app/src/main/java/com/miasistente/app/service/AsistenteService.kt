@@ -8,8 +8,12 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.os.Bundle
 import android.os.IBinder
 import android.os.SystemClock
+import android.speech.RecognitionListener
+import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
@@ -23,11 +27,13 @@ import com.miasistente.app.audio.WakeWordEngine
 import com.miasistente.app.data.Ajustes
 import com.miasistente.app.dominio.AssistantState
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -37,7 +43,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.IOException
+import java.util.Locale
 
 data class EstadoAudio(
     val capturando: Boolean = false,
@@ -68,6 +76,7 @@ class AsistenteService : Service() {
         private const val CHANNEL_ID = "asistente_escucha"
         private const val NOTIFICATION_ID = 1001
         private const val INTERVALO_UI_MS = 100L
+        private const val TIMEOUT_DICTADO_MS = 12_000L
 
         private val _isRunning = MutableStateFlow(false)
         val isRunning: StateFlow<Boolean> = _isRunning.asStateFlow()
@@ -101,6 +110,8 @@ class AsistenteService : Service() {
     @Volatile private var grabador: AudioRecorder? = null
     @Volatile private var motor: WakeWordEngine? = null
     @Volatile private var destruido = false
+    @Volatile private var escuchandoComandoNativo = false
+
     private val detector = VoiceDetector()
     private val procesador by lazy {
         com.miasistente.app.comandos.ProcesadorComandos(applicationContext)
@@ -184,6 +195,12 @@ class AsistenteService : Service() {
         _estadoAudio.update { it.copy(preparandoModelo = false, progresoModelo = -1) }
         _assistantState.update { AssistantState.IDLE }
 
+        iniciarGrabadorWakeWord()
+    }
+
+    private fun iniciarGrabadorWakeWord() {
+        if (destruido || grabador != null) return
+        detector.reiniciar()
         val nuevoGrabador = AudioRecorder(applicationContext)
         val ok = nuevoGrabador.iniciar(
             onFrame = { muestras, cantidad -> procesarFrame(muestras, cantidad) },
@@ -221,13 +238,16 @@ class AsistenteService : Service() {
     }
 
     private fun procesarFrame(muestras: ShortArray, cantidad: Int) {
+        if (escuchandoComandoNativo) return
+
         val voz = detector.procesar(muestras, cantidad)
 
-        if (_isRunning.value && _assistantState.value != AssistantState.THINKING && _assistantState.value != AssistantState.SPEAKING) {
-            if (voz.hayVoz) {
-                _assistantState.update { AssistantState.LISTENING }
-            } else {
-                _assistantState.update { AssistantState.IDLE }
+        if (_isRunning.value &&
+            _assistantState.value != AssistantState.THINKING &&
+            _assistantState.value != AssistantState.SPEAKING
+        ) {
+            _assistantState.update {
+                if (voz.hayVoz) AssistantState.LISTENING else AssistantState.IDLE
             }
         }
 
@@ -240,7 +260,10 @@ class AsistenteService : Service() {
         }
 
         val textoMotor = motorActual?.ultimoTexto.orEmpty()
-        if (detectada) alDetectarPalabra(textoMotor)
+        if (detectada) {
+            alDetectarPalabraClave()
+            return
+        }
 
         val ahora = SystemClock.elapsedRealtime()
         val actual = _estadoAudio.value
@@ -262,33 +285,141 @@ class AsistenteService : Service() {
         }
     }
 
-    private fun alDetectarPalabra(texto: String) {
-        if (texto.isBlank()) return
+    private fun alDetectarPalabraClave() {
+        if (escuchandoComandoNativo || destruido) return
+        escuchandoComandoNativo = true
         contadorActivaciones++
-        Log.d(TAG, "¡Comando transcrito! (#$contadorActivaciones) texto=«$texto»")
-        _estadoAudio.update {
-            it.copy(activaciones = contadorActivaciones, ultimoTexto = texto)
-        }
 
-        _assistantState.update { AssistantState.THINKING }
+        // Liberamos el micrófono de AudioRecord para cederlo al SpeechRecognizer nativo
+        grabador?.detener()
+        grabador = null
+
+        _assistantState.update { AssistantState.LISTENING }
+        _estadoAudio.update {
+            it.copy(
+                activaciones = contadorActivaciones,
+                hayVoz = true,
+                ultimoTexto = ""
+            )
+        }
 
         scope.launch {
             try {
-                val resultado = procesador.procesar(texto)
+                val comando = transcribirComandoNativo()
+                if (comando.isNullOrBlank()) {
+                    Log.d(TAG, "Sin comando tras palabra clave; volviendo a modo espera")
+                    return@launch
+                }
 
-                _eventosComando.emit(EventoComandoVoz(comandoUsuario = texto, respuesta = resultado.mensaje))
+                Log.d(TAG, "¡Comando transcrito! (#$contadorActivaciones) texto=«$comando»")
+                _estadoAudio.update { it.copy(ultimoTexto = comando, hayVoz = false) }
+                _assistantState.update { AssistantState.THINKING }
+
+                val resultado = procesador.procesar(comando)
+                _eventosComando.emit(
+                    EventoComandoVoz(comandoUsuario = comando, respuesta = resultado.mensaje)
+                )
 
                 _assistantState.update { AssistantState.SPEAKING }
-                kotlinx.coroutines.delay(2000L)
+                delay(2000L)
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Log.e(TAG, "Error procesando comando tras activación", e)
             } finally {
+                escuchandoComandoNativo = false
                 _assistantState.update { AssistantState.IDLE }
+                _estadoAudio.update { it.copy(hayVoz = false) }
+                if (!destruido && _isRunning.value) {
+                    iniciarGrabadorWakeWord()
+                }
+            }
+        }
+    }
+
+    private suspend fun transcribirComandoNativo(): String? {
+        if (!SpeechRecognizer.isRecognitionAvailable(applicationContext)) {
+            Log.w(TAG, "SpeechRecognizer nativo no disponible en este dispositivo")
+            return null
+        }
+
+        return withTimeoutOrNull(TIMEOUT_DICTADO_MS) {
+            withContext(Dispatchers.Main) {
+                val resultadoDiferido = CompletableDeferred<String?>()
+                val recognizer = SpeechRecognizer.createSpeechRecognizer(applicationContext)
+
+                val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                    putExtra(
+                        RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                        RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
+                    )
+                    putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault().toLanguageTag())
+                    putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+                    putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+                }
+
+                recognizer.setRecognitionListener(object : RecognitionListener {
+                    override fun onReadyForSpeech(params: Bundle?) {
+                        _estadoAudio.update { it.copy(capturando = true, hayVoz = true) }
+                    }
+
+                    override fun onBeginningOfSpeech() {
+                        _estadoAudio.update { it.copy(hayVoz = true) }
+                    }
+
+                    override fun onRmsChanged(rmsdB: Float) {
+                        _estadoAudio.update { it.copy(nivelDb = rmsdB) }
+                    }
+
+                    override fun onBufferReceived(buffer: ByteArray?) = Unit
+
+                    override fun onEndOfSpeech() {
+                        _estadoAudio.update { it.copy(hayVoz = false) }
+                    }
+
+                    override fun onError(error: Int) {
+                        Log.d(TAG, "SpeechRecognizer finalizó con código: $error")
+                        if (!resultadoDiferido.isCompleted) {
+                            resultadoDiferido.complete(null)
+                        }
+                    }
+
+                    override fun onResults(results: Bundle?) {
+                        val texto = results
+                            ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                            ?.firstOrNull()
+                            ?.trim()
+                        if (!resultadoDiferido.isCompleted) {
+                            resultadoDiferido.complete(texto)
+                        }
+                    }
+
+                    override fun onPartialResults(partialResults: Bundle?) {
+                        val parcial = partialResults
+                            ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                            ?.firstOrNull()
+                            ?.trim()
+                        if (!parcial.isNullOrBlank()) {
+                            _estadoAudio.update { it.copy(ultimoTexto = parcial) }
+                        }
+                    }
+
+                    override fun onEvent(eventType: Int, params: Bundle?) = Unit
+                })
+
+                try {
+                    recognizer.startListening(intent)
+                    resultadoDiferido.await()
+                } finally {
+                    runCatching { recognizer.cancel() }
+                    runCatching { recognizer.destroy() }
+                }
             }
         }
     }
 
     private fun detenerEscucha() {
+        escuchandoComandoNativo = false
         grabador?.detener()
         grabador = null
         motor?.close()
