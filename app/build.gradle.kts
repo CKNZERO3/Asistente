@@ -49,7 +49,7 @@ android {
         )
 
         ndk {
-            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+            abiFilters += listOf("arm64-v8a")
         }
     }
 
@@ -58,7 +58,12 @@ android {
             if (hayFirmaFija) signingConfig = signingConfigs.getByName("iris")
         }
         getByName("release") {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
             if (hayFirmaFija) signingConfig = signingConfigs.getByName("iris")
         }
     }
