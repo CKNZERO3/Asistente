@@ -45,79 +45,63 @@ class VoskWakeWord(
         throw e
     }
 
-    private val recognizerCommand: Recognizer = Recognizer(model, AudioRecorder.SAMPLE_RATE.toFloat())
-
     private val preroll = Array(PREROLL_FRAMES) { ShortArray(AudioRecorder.FRAME_SIZE) }
     private val prerollLargo = IntArray(PREROLL_FRAMES)
     private var prerollSiguiente = 0
     private var prerollUsados = 0
 
     private var vozActiva = false
-    private var modoEscuchandoComando = false
     private var cerrado = false
 
     @Synchronized
     override fun procesar(muestras: ShortArray, cantidad: Int, hayVoz: Boolean): Boolean {
         if (cerrado) return false
-        var detectada = false
 
-        if (modoEscuchandoComando) {
-            if (hayVoz) {
-                recognizerCommand.acceptWaveForm(muestras, cantidad)
-            } else {
-                modoEscuchandoComando = false
-                val json = recognizerCommand.finalResult
-                val textoTranscrito = extraerTextoJson(json)
-                if (textoTranscrito.isNotBlank()) {
-                    ultimo = textoTranscrito
-                    detectada = true
+        if (hayVoz) {
+            if (!vozActiva) {
+                vozActiva = true
+                val inicio = (prerollSiguiente - prerollUsados + PREROLL_FRAMES) % PREROLL_FRAMES
+                for (i in 0 until prerollUsados) {
+                    val indice = (inicio + i) % PREROLL_FRAMES
+                    if (alimentarWake(preroll[indice], prerollLargo[indice])) {
+                        reiniciarEstadoWake()
+                        return true
+                    }
                 }
-                recognizerCommand.reset()
-                recognizerWake.reset()
+                prerollUsados = 0
+            }
+            if (alimentarWake(muestras, cantidad)) {
+                reiniciarEstadoWake()
+                return true
             }
         } else {
-            if (hayVoz) {
-                if (!vozActiva) {
-                    vozActiva = true
-                    val inicio = (prerollSiguiente - prerollUsados + PREROLL_FRAMES) % PREROLL_FRAMES
-                    for (i in 0 until prerollUsados) {
-                        val indice = (inicio + i) % PREROLL_FRAMES
-                        if (alimentarWake(preroll[indice], prerollLargo[indice])) {
-                            activarModoComando(muestras, cantidad)
-                            return false
-                        }
-                    }
+            if (vozActiva) {
+                vozActiva = false
+                val detectada = evaluarWake(recognizerWake.finalResult)
+                recognizerWake.reset()
+                if (detectada) {
                     prerollUsados = 0
+                    return true
                 }
-                if (alimentarWake(muestras, cantidad)) {
-                    activarModoComando(muestras, cantidad)
-                    return false
-                }
-            } else {
-                if (vozActiva) {
-                    vozActiva = false
-                    evaluarWake(recognizerWake.getFinalResult())
-                    recognizerWake.reset()
-                }
-                guardarEnPreroll(muestras, cantidad)
             }
+            guardarEnPreroll(muestras, cantidad)
         }
-        return detectada
+        return false
+    }
+
+    private fun reiniciarEstadoWake() {
+        Log.d(TAG, "¡Palabra clave «$palabraClave» detectada!")
+        vozActiva = false
+        prerollUsados = 0
+        recognizerWake.reset()
     }
 
     private fun alimentarWake(muestras: ShortArray, cantidad: Int): Boolean =
         if (recognizerWake.acceptWaveForm(muestras, cantidad)) {
-            evaluarWake(recognizerWake.getResult())
+            evaluarWake(recognizerWake.result)
         } else {
             false
         }
-
-    private fun activarModoComando(muestras: ShortArray, cantidad: Int) {
-        Log.d(TAG, "¡Palabra clave detectada! Cambiando a transcripción libre...")
-        modoEscuchandoComando = true
-        vozActiva = false
-        recognizerCommand.acceptWaveForm(muestras, cantidad)
-    }
 
     private fun guardarEnPreroll(muestras: ShortArray, cantidad: Int) {
         val largo = minOf(cantidad, AudioRecorder.FRAME_SIZE)
@@ -159,7 +143,6 @@ class VoskWakeWord(
         cerrado = true
         try {
             recognizerWake.close()
-            recognizerCommand.close()
         } finally {
             model.close()
         }
