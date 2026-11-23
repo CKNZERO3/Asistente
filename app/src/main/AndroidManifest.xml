@@ -24,6 +24,10 @@
            <action android:name="android.intent.action.SEND" />
            <data android:mimeType="image/*" />
        </intent>
+       <!-- Visibilidad para SpeechRecognizer nativo en Android 11+ -->
+       <intent>
+           <action android:name="android.speech.RecognitionService" />
+       </intent>
     </queries>
 
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
