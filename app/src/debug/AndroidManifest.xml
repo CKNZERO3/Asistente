@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Solo en compilaciones debug: segundo icono "Iris Laboratorio" para las pruebas de rendimiento. -->
+    <application>
+        <activity
+            android:name="com.miasistente.app.laboratorio.LaboratorioRendimientoActivity"
+            android:exported="true"
+            android:label="Iris Laboratorio"
+            android:launchMode="singleTop">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
