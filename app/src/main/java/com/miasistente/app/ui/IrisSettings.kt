@@ -1367,7 +1367,7 @@ fun NotebookDigitalPlanner(
                                     val shareUri = if (parsed.scheme == "file" && parsed.path != null) {
                                         FileProvider.getUriForFile(
                                             context,
-                                            "${context.packageName}.fileprovider",
+                                            "${context.packageName}.archivos",
                                             File(parsed.path!!)
                                         )
                                     } else {
