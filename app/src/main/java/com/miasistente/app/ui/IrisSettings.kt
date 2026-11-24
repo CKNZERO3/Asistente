@@ -68,6 +68,11 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.FileProvider
+import com.miasistente.app.comandos.ModeloLocal
+import com.miasistente.app.data.HardwareDispositivo
+import com.miasistente.app.data.InteligenciaConfig
+import com.miasistente.app.data.ModoEjecucionLocal
+import com.miasistente.app.data.PerfilModeloLocal
 import com.miasistente.app.memoria.ClasificadorCuadernos
 import com.miasistente.app.memoria.Cuaderno
 import com.miasistente.app.memoria.MemoriaLocal
@@ -95,7 +100,7 @@ fun IrisSettingsScreen(
 
     val handleAction: (String) -> Unit = { action ->
         when (action) {
-            "account", "limits", "intelligence", "skills" -> activeModalAction = action
+            "account", "limits", "skills" -> activeModalAction = action
             else -> onAction(action)
         }
     }
@@ -130,6 +135,10 @@ fun IrisSettingsScreen(
                 onAction = handleAction,
                 onNavigate = { currentPage = it }
             )
+            "intelligence" -> IntelligencePage(
+                onImportModel = { onAction("import_model") },
+                onBack = { currentPage = "main" }
+            )
             "theme" -> ThemeSubmenuPage(
                 darkTheme = darkTheme,
                 amoledMode = amoledMode,
@@ -154,11 +163,10 @@ fun IrisSettingsScreen(
 
     activeModalAction?.let { actionKey ->
         val (dialogTitle, dialogBody) = when (actionKey) {
-            "account" -> "Administrar cuenta" to "SesiÃ³n local activa en Iris. PrÃ³ximamente sincronizaciÃ³n con Google."
-            "limits" -> "LÃ­mites de uso" to "Modo hÃ­brido: consultas ligeras en Gemma 3 1B local y complejas en la nube."
-            "intelligence" -> "Inteligencia personalizada" to "Iris aprende tus cuadernos y preferencias locales de forma progresiva."
-            "skills" -> "Habilidades" to "Cuadernos inteligentes, memoria offline, visiÃ³n y comandos de voz activos."
-            else -> "Iris" to "FunciÃ³n en desarrollo."
+            "account" -> "Administrar cuenta" to "Sesión local activa en Iris. Próximamente sincronización con Google."
+            "limits" -> "Límites de uso" to "Modo híbrido: consultas ligeras en modelo local y complejas en la nube."
+            "skills" -> "Habilidades" to "Cuadernos inteligentes, memoria offline, visión y comandos de voz activos."
+            else -> "Iris" to "Función en desarrollo."
         }
         AlertDialog(
             onDismissRequest = { activeModalAction = null },
@@ -192,7 +200,7 @@ private fun MainSettingsContent(
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {}
             .windowInsetsPadding(WindowInsets.systemBars)
     ) {
-        SettingsTopBar("ConfiguraciÃ³n", onBack)
+        SettingsTopBar("Configuración", onBack)
 
         Column(
             modifier = Modifier
@@ -205,14 +213,18 @@ private fun MainSettingsContent(
             }
             Spacer(modifier = Modifier.height(12.dp))
             SettingsCard {
-                SettingsItem("LÃ­mites de uso", null, Icons.Outlined.Schedule) { onAction("limits") }
+                SettingsItem("Límites de uso", null, Icons.Outlined.Schedule) { onAction("limits") }
             }
 
             SettingsSection("Preferencias")
             SettingsCard {
                 SettingsItem("Notificaciones", null, Icons.Outlined.Notifications) { onNavigate("notifications") }
                 SettingsDivider()
-                SettingsItem("Inteligencia personalizada", null, Icons.Outlined.AutoAwesome) { onAction("intelligence") }
+                SettingsItem(
+                    "Inteligencia personalizada",
+                    "Hardware, perfil local (.litertlm) y modo híbrido",
+                    Icons.Outlined.AutoAwesome
+                ) { onNavigate("intelligence") }
                 SettingsDivider()
 
                 Row(
@@ -241,7 +253,7 @@ private fun MainSettingsContent(
                     Spacer(Modifier.width(16.dp))
                     Column(Modifier.weight(1f)) {
                         Text("Avatar 3D", color = p.text, fontSize = 16.sp)
-                        Text("AnimaciÃ³n del sistema", color = p.muted, fontSize = 13.sp)
+                        Text("Animación del sistema", color = p.muted, fontSize = 13.sp)
                     }
                     Switch(
                         checked = avatarEnabled,
@@ -276,6 +288,224 @@ private fun MainSettingsContent(
                     "Archivo .litertlm (p. ej. Gemma 3 1B). Resume y responde tareas ligeras sin gastar cuota de Gemini.",
                     Icons.Outlined.UploadFile
                 ) { onAction("import_model") }
+            }
+            Spacer(Modifier.height(32.dp))
+        }
+    }
+}
+
+@Composable
+fun IntelligencePage(
+    onImportModel: () -> Unit,
+    onBack: () -> Unit
+) {
+    val p = LocalIrisPalette.current
+    val context = LocalContext.current
+    val config = remember { InteligenciaConfig(context) }
+    val modeloLocal = remember { ModeloLocal(context) }
+    val hardware = remember { HardwareDispositivo.inspeccionar(context) }
+
+    var perfilSeleccionado by remember { mutableStateOf(config.perfilModeloLocal) }
+    var modoEjecucion by remember { mutableStateOf(config.modoEjecucionLocal) }
+    var urlPersonalizada by remember(perfilSeleccionado) {
+        mutableStateOf(config.urlModeloPerfil(perfilSeleccionado))
+    }
+    var modeloInstalado by remember { mutableStateOf(modeloLocal.disponible()) }
+    val descarga by ModeloLocal.estadoDescarga.collectAsState()
+
+    LaunchedEffect(descarga.completado) {
+        if (descarga.completado) {
+            modeloInstalado = modeloLocal.disponible()
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+            .windowInsetsPadding(WindowInsets.systemBars)
+    ) {
+        SettingsTopBar("Inteligencia personalizada", onBack)
+
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp, vertical = 8.dp)
+        ) {
+            SettingsSection("Capacidad del dispositivo")
+            SettingsCard {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        text = "RAM: ${String.format(Locale.US, "%.1f", hardware.ramTotalMb / 1024.0)} GB total (${hardware.ramDisponibleMb} MB libres)",
+                        color = p.text,
+                        fontSize = 14.sp
+                    )
+                    Text(
+                        text = "CPU: ${hardware.nucleosCpu} núcleos · Espacio libre: ${String.format(Locale.US, "%.1f", hardware.almacenamientoLibreMb / 1024.0)} GB",
+                        color = p.muted,
+                        fontSize = 13.sp
+                    )
+                    Text(
+                        text = if (modeloInstalado) {
+                            val nombre = config.nombreModeloLocalInstalado.ifBlank { "modelo_local.litertlm" }
+                            "Modelo activo: $nombre (${modeloLocal.tamanoLegible()})"
+                        } else {
+                            "Sin modelo local instalado (usando nube o habilidades offline)"
+                        },
+                        color = if (modeloInstalado) p.accent else p.muted,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                    if (modeloInstalado) {
+                        TextButton(
+                            onClick = {
+                                modeloLocal.eliminar()
+                                modeloInstalado = false
+                            },
+                            contentPadding = PaddingValues(0.dp)
+                        ) {
+                            Text("Eliminar modelo local instalado", color = Color(0xFFFF6B6B), fontSize = 13.sp)
+                        }
+                    }
+                }
+            }
+
+            SettingsSection("Perfil de IA local (.litertlm)")
+            SettingsCard {
+                PerfilModeloLocal.entries.forEachIndexed { idx, perfil ->
+                    val compatible = hardware.esCompatible(perfil)
+                    val esRecomendado = hardware.perfilRecomendado == perfil
+                    val titulo = if (esRecomendado) "${perfil.titulo} · Recomendado" else perfil.titulo
+                    val subtitulo = hardware.motivoIncompatibilidad(perfil)
+                        ?: "${perfil.modeloSugerido} — ${perfil.descripcion}"
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable(enabled = compatible) {
+                                perfilSeleccionado = perfil
+                                config.perfilModeloLocal = perfil
+                            }
+                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = titulo,
+                                color = if (compatible) p.text else p.muted,
+                                fontSize = 15.sp,
+                                fontWeight = if (esRecomendado) FontWeight.SemiBold else FontWeight.Normal
+                            )
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                text = subtitulo,
+                                color = if (compatible) p.muted else Color(0xFFFF8A80),
+                                fontSize = 12.sp
+                            )
+                        }
+                        RadioButton(
+                            selected = perfilSeleccionado == perfil,
+                            enabled = compatible,
+                            onClick = if (compatible) {
+                                {
+                                    perfilSeleccionado = perfil
+                                    config.perfilModeloLocal = perfil
+                                }
+                            } else null,
+                            colors = RadioButtonDefaults.colors(
+                                selectedColor = p.accent,
+                                unselectedColor = p.muted
+                            )
+                        )
+                    }
+                    if (idx < PerfilModeloLocal.entries.lastIndex) SettingsDivider()
+                }
+            }
+
+            SettingsSection("Descarga o importación del modelo")
+            SettingsCard {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedTextField(
+                        value = urlPersonalizada,
+                        onValueChange = {
+                            urlPersonalizada = it
+                            config.guardarUrlModeloPerfil(perfilSeleccionado, it)
+                        },
+                        singleLine = true,
+                        label = { Text("URL directa del archivo .litertlm") },
+                        placeholder = { Text("https://.../modelo.litertlm") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    if (descarga.descargando) {
+                        LinearProgressIndicator(
+                            progress = { descarga.progreso / 100f },
+                            modifier = Modifier.fillMaxWidth(),
+                            color = p.accent
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                "Descargando ${descarga.perfilNombre}… ${descarga.progreso}%",
+                                color = p.muted,
+                                fontSize = 12.sp
+                            )
+                            TextButton(onClick = { modeloLocal.cancelarDescarga() }) {
+                                Text("Cancelar", color = Color(0xFFFF6B6B), fontSize = 12.sp)
+                            }
+                        }
+                    } else {
+                        descarga.error?.let { err ->
+                            Text(err, color = Color(0xFFFF8A80), fontSize = 12.sp)
+                        }
+                        Button(
+                            onClick = {
+                                val url = urlPersonalizada.trim()
+                                if (url.isBlank()) {
+                                    Toast.makeText(
+                                        context,
+                                        "Pega una URL directa o importa un archivo .litertlm desde tu teléfono",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                } else {
+                                    modeloLocal.iniciarDescarga(url, perfilSeleccionado)
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = p.accent),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Descargar ${perfilSeleccionado.modeloSugerido}", color = Color.White)
+                        }
+                    }
+
+                    OutlinedButton(
+                        onClick = onImportModel,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Outlined.UploadFile, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Importar archivo .litertlm del teléfono")
+                    }
+                }
+            }
+
+            SettingsSection("Estrategia híbrida (Local vs Nube)")
+            SettingsCard {
+                ModoEjecucionLocal.entries.forEachIndexed { idx, modo ->
+                    SettingsRadioItem(
+                        title = modo.titulo,
+                        subtitle = modo.descripcion,
+                        selected = modoEjecucion == modo
+                    ) {
+                        modoEjecucion = modo
+                        config.modoEjecucionLocal = modo
+                    }
+                    if (idx < ModoEjecucionLocal.entries.lastIndex) SettingsDivider()
+                }
             }
             Spacer(Modifier.height(32.dp))
         }
@@ -473,7 +703,7 @@ fun ThemeSubmenuPage(
                             Spacer(Modifier.width(16.dp))
                             Column(Modifier.weight(1f)) {
                                 Text("Fondo Negro AMOLED", color = p.text, fontSize = 16.sp)
-                                Text("Ahorra baterÃ­a con negros puros", color = p.muted, fontSize = 13.sp)
+                                Text("Ahorra batería con negros puros", color = p.muted, fontSize = 13.sp)
                             }
                             Switch(
                                 checked = amoledMode,
@@ -530,7 +760,7 @@ fun ThemeSubmenuPage(
                 }
             }
 
-            SettingsSection("Fondos clÃ¡sicos del chat")
+            SettingsSection("Fondos clásicos del chat")
             val wallpapers = listOf(
                 "Animado (Por defecto)" to Color(0xFF080C21),
                 "Nebulosa" to Color(0xFF17112C),
@@ -606,7 +836,7 @@ fun NotificationsPage(onBack: () -> Unit) {
                 SettingsDivider()
                 SettingsToggleItem("Recordatorios y tareas", notifReminders) { notifReminders = it }
                 SettingsDivider()
-                SettingsToggleItem("Avisos de activaciÃ³n por voz", notifVoiceWake) { notifVoiceWake = it }
+                SettingsToggleItem("Avisos de activación por voz", notifVoiceWake) { notifVoiceWake = it }
                 SettingsDivider()
                 SettingsToggleItem("Sugerencias inteligentes", notifSmartSuggestions) { notifSmartSuggestions = it }
             }
@@ -634,9 +864,9 @@ fun VoicePage(onImportVoice: () -> Unit, onBack: () -> Unit) {
     }
     val voices = listOf(
         "Nova" to "Clara y natural",
-        "Lyra" to "CÃ¡lida y cercana",
+        "Lyra" to "Cálida y cercana",
         "Orion" to "Profunda y serena",
-        "Vega" to "Ãgil y expresiva",
+        "Vega" to "Ágil y expresiva",
         "Echo" to "Neutra y precisa"
     )
 
@@ -692,9 +922,9 @@ fun MultimediaPage(onBack: () -> Unit) {
                     )
                 }
                 SettingsDivider()
-                SettingsToggleItem("ReproducciÃ³n automÃ¡tica", autoPlayMedia) { autoPlayMedia = it }
+                SettingsToggleItem("Reproducción automática", autoPlayMedia) { autoPlayMedia = it }
                 SettingsDivider()
-                SettingsToggleItem("Guardar imÃ¡genes generadas", saveGeneratedImages) { saveGeneratedImages = it }
+                SettingsToggleItem("Guardar imágenes generadas", saveGeneratedImages) { saveGeneratedImages = it }
             }
         }
         SettingsSaveButton("Listo") {
@@ -724,7 +954,7 @@ fun DevicesPage(onBack: () -> Unit) {
             SettingsCard {
                 SettingsToggleItem("Control por voz en pantalla bloqueada", lockscreenVoice) { lockscreenVoice = it }
                 SettingsDivider()
-                SettingsToggleItem("Audio Bluetooth automÃ¡tico", autoBluetooth) { autoBluetooth = it }
+                SettingsToggleItem("Audio Bluetooth automático", autoBluetooth) { autoBluetooth = it }
                 SettingsDivider()
                 SettingsToggleItem("Sincronizar con accesorios", syncAccessories) { syncAccessories = it }
             }
@@ -747,7 +977,7 @@ data class NotebookEntry(
     val date: String,
     val pinned: Boolean = false,
     val locked: Boolean = false,
-    val paperType: String = "LÃ­neas"
+    val paperType: String = "Líneas"
 )
 
 data class NotebookAttachment(
@@ -905,7 +1135,7 @@ fun NotebookMockupPage(onBack: () -> Unit) {
                             )
                             Spacer(Modifier.height(8.dp))
                             Text(
-                                text = "Ãšltima mod: ${note.date}",
+                                text = "Última mod: ${note.date}",
                                 fontSize = 10.sp,
                                 color = Color.DarkGray
                             )
@@ -965,7 +1195,7 @@ fun NotebookMockupPage(onBack: () -> Unit) {
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        "Escribe un nombre o describe el tema (si lo dejas vacÃ­o, se crearÃ¡ uno automÃ¡tico).",
+                        "Escribe un nombre o describe el tema (si lo dejas vacío, se creará uno automático).",
                         fontSize = 13.sp,
                         color = p.muted
                     )
@@ -1120,7 +1350,7 @@ fun NotebookDigitalPlanner(
                 .drawBehind {
                     val lineColor = Color(0xFFD3D3D3)
                     when (paperType) {
-                        "LÃ­neas" -> {
+                        "Líneas" -> {
                             val spacing = 32.dp.toPx()
                             var y = 100.dp.toPx()
                             while (y < size.height) {
@@ -1133,7 +1363,7 @@ fun NotebookDigitalPlanner(
                                 y += spacing
                             }
                         }
-                        "CuadrÃ­cula" -> {
+                        "Cuadrícula" -> {
                             val spacing = 24.dp.toPx()
                             var y = spacing
                             while (y < size.height) {
@@ -1213,7 +1443,7 @@ fun NotebookDigitalPlanner(
                     )
                 }
                 IconButton(onClick = { showMenu = !showMenu }) {
-                    Icon(Icons.Default.MoreVert, contentDescription = "MenÃº", tint = Color.Black)
+                    Icon(Icons.Default.MoreVert, contentDescription = "Menú", tint = Color.Black)
                 }
             }
 
@@ -1252,7 +1482,7 @@ fun NotebookDigitalPlanner(
                     Box(modifier = Modifier.fillMaxSize()) {
                         if (bodyField.text.isEmpty()) {
                             Text(
-                                text = "Escribe aquÃ­ o adjunta imÃ¡genes y archivos...",
+                                text = "Escribe aquí o adjunta imágenes y archivos...",
                                 color = Color(0xFF999999),
                                 fontSize = 16.sp
                             )
@@ -1328,7 +1558,7 @@ fun NotebookDigitalPlanner(
             onDismissRequest = { previewAttachment = null },
             properties = DialogProperties(usePlatformDefaultWidth = false)
         ) {
-                        Box(
+            Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(
@@ -1414,7 +1644,7 @@ fun NotebookDigitalPlanner(
                         .padding(vertical = 12.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    listOf("Lisa", "LÃ­neas", "CuadrÃ­cula", "Puntos").forEach { type ->
+                    listOf("Lisa", "Líneas", "Cuadrícula", "Puntos").forEach { type ->
                         val selected = paperType == type
                         Box(
                             modifier = Modifier
