@@ -305,6 +305,7 @@ class AsistenteService : Service() {
 
         scope.launch {
             try {
+                delay(120L)
                 val comando = transcribirComandoNativo()
                 if (comando.isNullOrBlank()) {
                     Log.d(TAG, "Sin comando tras palabra clave; volviendo a modo espera")
