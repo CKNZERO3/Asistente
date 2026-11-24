@@ -49,4 +49,27 @@ class InteligenciaConfigTest {
         assertThat(prompt).contains("Memoria y preferencias del usuario")
         assertThat(prompt).contains("Cristian")
     }
+
+    @Test
+    fun diagnosticoHardwareProtegeDispositivosDeBajosRecursos() {
+        val gamaBaja = HardwareDispositivo.evaluar(
+            ramTotalMb = 3_800,
+            ramDisponibleMb = 1_400,
+            nucleosCpu = 4,
+            almacenamientoLibreMb = 12_000
+        )
+        assertThat(gamaBaja.perfilRecomendado).isEqualTo(PerfilModeloLocal.BASICO)
+        assertThat(gamaBaja.esCompatible(PerfilModeloLocal.BASICO)).isTrue()
+        assertThat(gamaBaja.esCompatible(PerfilModeloLocal.INTERMEDIO)).isFalse()
+        assertThat(gamaBaja.esCompatible(PerfilModeloLocal.AVANZADO)).isFalse()
+
+        val gamaMedia = HardwareDispositivo.evaluar(5_800, 2_500, 8, 30_000)
+        assertThat(gamaMedia.perfilRecomendado).isEqualTo(PerfilModeloLocal.INTERMEDIO)
+        assertThat(gamaMedia.esCompatible(PerfilModeloLocal.INTERMEDIO)).isTrue()
+        assertThat(gamaMedia.esCompatible(PerfilModeloLocal.AVANZADO)).isFalse()
+
+        val gamaAlta = HardwareDispositivo.evaluar(11_500, 6_000, 8, 80_000)
+        assertThat(gamaAlta.perfilRecomendado).isEqualTo(PerfilModeloLocal.AVANZADO)
+        assertThat(gamaAlta.esCompatible(PerfilModeloLocal.AVANZADO)).isTrue()
+    }
 }
