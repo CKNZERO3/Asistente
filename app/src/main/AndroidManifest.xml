@@ -40,6 +40,15 @@
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.NoActionBar">
 
+        <!-- IA local (LiteRT-LM): el backend GPU necesita declarar estas librerías en Android 12+.
+             Sin ellas falla con "Can not find OpenCL library on this device". -->
+        <uses-native-library
+            android:name="libvndksupport.so"
+            android:required="false" />
+        <uses-native-library
+            android:name="libOpenCL.so"
+            android:required="false" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true">
