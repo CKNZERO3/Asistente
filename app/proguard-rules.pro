@@ -14,3 +14,8 @@
 # --- Coroutines & Credentials ---
 -dontwarn kotlinx.coroutines.**
 -dontwarn androidx.credentials.**
+
+# --- Atributos genéricos y el SDK de Google Identity ---
+-keepattributes Signature,InnerClasses,EnclosingMethod
+-keep class com.google.android.libraries.identity.googleid.** { *; }
+-dontwarn com.google.errorprone.annotations.**
