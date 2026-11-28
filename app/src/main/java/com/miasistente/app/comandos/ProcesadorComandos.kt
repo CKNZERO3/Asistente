@@ -30,6 +30,19 @@ class ProcesadorComandos(context: Context) {
     private val memoria = MemoriaLocal.get(appContext)
     private val inteligencia = InteligenciaConfig(appContext)
     private val despachador = DespachadorUtilidades(parser, local, notas, memoria, clima)
+    private val hybridRouter = HybridIntentRouter(
+        localEngine = object : HybridIntentRouter.LocalOneTokenEngine {
+            override val isLoaded: Boolean
+                get() = modeloLocal.estaCargadoEnMemoria()
+
+            override suspend fun inferSingleToken(prompt: String): String =
+                modeloLocal.inferirDosTokens(prompt)
+        }
+    )
+
+    fun limpiarHistorialChat() {
+        gemini.limpiarHistorial()
+    }
 
     suspend fun procesar(
         texto: String,
@@ -74,8 +87,12 @@ class ProcesadorComandos(context: Context) {
                         return consultarClima(it)
                     }
 
-                    // Nivel 1: enrutador de utilidades local (Tool-Calling con Gemma 3)
-                    if (modeloLocal.disponible() && inteligencia.modoEjecucionLocal != ModoEjecucionLocal.SOLO_NUBE) {
+                    // Nivel 1: enrutador de utilidades local (solo si menciona acciones del dispositivo)
+                    if (
+                        modeloLocal.disponible() &&
+                        inteligencia.modoEjecucionLocal != ModoEjecucionLocal.SOLO_NUBE &&
+                        patronAccionSistema.containsMatchIn(normalizar(comando))
+                    ) {
                         val contexto = memoria.construirContextoUsuario(comando, perfil.nombre)
                         val promptTools = RegistroUtilidades.generarPromptCompactoLocal(contexto)
                         val salidaJson = modeloLocal.generar(promptTools, comando).getOrDefault("")
@@ -86,10 +103,13 @@ class ProcesadorComandos(context: Context) {
                             return despacho.resultado.also { registrarSiRespuestaUtil(it) }
                         }
                         val consultaFinal = despacho.escalarANubePrompt ?: intencion.pregunta
-                        return responderConsulta(consultaFinal).also { registrarSiRespuestaUtil(it) }
+                        val esComplejaEscalada = hybridRouter.isComplexQuery(consultaFinal)
+                        return responderConsulta(consultaFinal, esComplejaEscalada)
+                            .also { registrarSiRespuestaUtil(it) }
                     }
 
-                    responderConsulta(intencion.pregunta).also {
+                    val esCompleja = hybridRouter.isComplexQuery(intencion.pregunta)
+                    responderConsulta(intencion.pregunta, esCompleja).also {
                         registrarSiRespuestaUtil(it)
                     }
                 }
@@ -208,11 +228,20 @@ class ProcesadorComandos(context: Context) {
         )
     }
 
-    private suspend fun responderConsulta(pregunta: String): ResultadoComando {
+    private suspend fun responderConsulta(
+        pregunta: String,
+        esCompleja: Boolean = false
+    ): ResultadoComando {
         habilidades.responder(pregunta)?.let { return ResultadoComando(true, it) }
         habilidades.peticionClima(pregunta)?.let { return consultarClima(it) }
 
         val seleccion = IrisModelSelector.seleccionar(pregunta)
+        val complejoFinal = esCompleja || seleccion.categoria == CategoriaTarea.COMPLEJA
+        val modeloObjetivo = if (complejoFinal) {
+            IrisModelSelector.MODELO_AVANZADO
+        } else {
+            seleccion.modelo
+        }
         val tiempoReal = IrisModelSelector.requiereTiempoReal(pregunta)
 
         if (tiempoReal && !inteligencia.conectorBusquedaWeb) {
@@ -248,7 +277,7 @@ class ProcesadorComandos(context: Context) {
         val usarLocalPrimero = modeloLocal.disponible() && !tiempoReal && when (modoLocal) {
             ModoEjecucionLocal.PRIORIZAR_LOCAL -> true
             ModoEjecucionLocal.SOLO_NUBE -> false
-            ModoEjecucionLocal.HIBRIDO -> seleccion.categoria == CategoriaTarea.LIGERA ||
+            ModoEjecucionLocal.HIBRIDO -> (!complejoFinal && seleccion.categoria == CategoriaTarea.LIGERA) ||
                 (!Conectividad.hayInternet(appContext) && recuerdosRelevantes.isNotEmpty())
         }
 
@@ -257,9 +286,10 @@ class ProcesadorComandos(context: Context) {
                 .onSuccess { return ResultadoComando(true, it) }
         }
         return consultarIris(
-            pregunta,
-            seleccion.modelo,
-            intentarLocalSiFalla = !usarLocalPrimero && !tiempoReal
+            pregunta = pregunta,
+            modelo = modeloObjetivo,
+            intentarLocalSiFalla = !usarLocalPrimero && !tiempoReal,
+            esCompleja = complejoFinal
         )
     }
 
@@ -322,7 +352,8 @@ class ProcesadorComandos(context: Context) {
     private suspend fun consultarIris(
         pregunta: String,
         modelo: String? = null,
-        intentarLocalSiFalla: Boolean = true
+        intentarLocalSiFalla: Boolean = true,
+        esCompleja: Boolean = false
     ): ResultadoComando {
         val proveedor = inteligencia.proveedorActivo
         val instruccionesExtra = inteligencia.construirBloqueInstrucciones()
@@ -385,7 +416,8 @@ class ProcesadorComandos(context: Context) {
             pregunta = pregunta,
             modeloSolicitado = elegido,
             instruccionesExtra = instruccionesExtra,
-            permitirBusquedaWeb = permitirWeb
+            permitirBusquedaWeb = permitirWeb,
+            esCompleja = esCompleja
         ).fold(
             onSuccess = { ResultadoComando(true, it) },
             onFailure = { errorNube ->
@@ -424,5 +456,8 @@ class ProcesadorComandos(context: Context) {
         const val CONTEXTO_APPS = "app_abierta"
         const val AVISO_SIN_NUBE =
             "No pude consultar a la nube; esta respuesta viene de mi modelo local y puede tener errores.\n\n"
+        val patronAccionSistema = Regex(
+            """\b(brillo|volumen|wifi|bluetooth|linterna|no molestar|bateria|alarma|temporizador|cronometro|llama|llamar|navegar|como llegar)\b"""
+        )
     }
 }
