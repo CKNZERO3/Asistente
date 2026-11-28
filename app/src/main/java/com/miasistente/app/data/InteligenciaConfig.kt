@@ -1,6 +1,8 @@
 package com.miasistente.app.data
 
+import android.app.ActivityManager
 import android.content.Context
+import android.os.StatFs
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
@@ -94,6 +96,124 @@ class SecureStorage(context: Context) {
         private const val ANDROID_KEYSTORE = "AndroidKeyStore"
         private const val KEY_ALIAS = "iris_api_keys_aes_gcm"
         private const val TRANSFORMACION = "AES/GCM/NoPadding"
+    }
+}
+
+/** Perfiles adaptativos de modelos locales (.litertlm) según la capacidad del hardware. */
+enum class PerfilModeloLocal(
+    val id: String,
+    val titulo: String,
+    val modeloSugerido: String,
+    val descripcion: String,
+    val ramTotalMinimaMb: Long,
+    val ramDisponibleMinimaMb: Long,
+    val almacenamientoMinimoMb: Long
+) {
+    BASICO(
+        id = "basico",
+        titulo = "Básico Inteligente",
+        modeloSugerido = "Gemma 3 1B int4 (~550 MB)",
+        descripcion = "Utilidades, notas, memoria local y enrutamiento rápido en gama de entrada.",
+        ramTotalMinimaMb = 0L,
+        ramDisponibleMinimaMb = 0L,
+        almacenamientoMinimoMb = 900L
+    ),
+    INTERMEDIO(
+        id = "intermedio",
+        titulo = "Intermedio Equilibrado",
+        modeloSugerido = "Gemma 3n E2B / Gemma 3 4B int4 (~1.8 GB)",
+        descripcion = "Redacción fluida, resúmenes offline y comprensión contextual ampliada.",
+        ramTotalMinimaMb = 5_000L,
+        ramDisponibleMinimaMb = 1_800L,
+        almacenamientoMinimoMb = 2_800L
+    ),
+    AVANZADO(
+        id = "avanzado",
+        titulo = "Avanzado Pro",
+        modeloSugerido = "Gemma 3n E4B int4 (~3.5 GB)",
+        descripcion = "Razonamiento profundo offline, documentos largos y tareas complejas.",
+        ramTotalMinimaMb = 9_500L,
+        ramDisponibleMinimaMb = 3_800L,
+        almacenamientoMinimoMb = 5_000L
+    );
+
+    companion object {
+        fun desdeId(id: String?): PerfilModeloLocal =
+            entries.firstOrNull { it.id == id } ?: BASICO
+    }
+}
+
+/** Resultado del diagnóstico de hardware y compatibilidad de modelos locales. */
+data class DiagnosticoHardware(
+    val ramTotalMb: Long,
+    val ramDisponibleMb: Long,
+    val nucleosCpu: Int,
+    val almacenamientoLibreMb: Long,
+    val perfilRecomendado: PerfilModeloLocal
+) {
+    fun esCompatible(perfil: PerfilModeloLocal): Boolean =
+        motivoIncompatibilidad(perfil) == null
+
+    fun motivoIncompatibilidad(perfil: PerfilModeloLocal): String? {
+        if (perfil == PerfilModeloLocal.BASICO) return null
+        if (ramTotalMb < perfil.ramTotalMinimaMb) {
+            val reqGb = String.format(java.util.Locale.US, "%.0f", perfil.ramTotalMinimaMb / 1024.0)
+            return "Requiere al menos $reqGb GB de RAM total para evitar cierres por memoria."
+        }
+        if (ramDisponibleMb < perfil.ramDisponibleMinimaMb) {
+            return "RAM libre insuficiente (mínimo ${perfil.ramDisponibleMinimaMb} MB disponibles)."
+        }
+        if (almacenamientoLibreMb < perfil.almacenamientoMinimoMb) {
+            val reqEspacio = String.format(java.util.Locale.US, "%.1f", perfil.almacenamientoMinimoMb / 1024.0)
+            return "Espacio insuficiente en almacenamiento (necesitas $reqEspacio GB libres)."
+        }
+        return null
+    }
+}
+
+/** Inspecciona las capacidades reales del teléfono (RAM, CPU y almacenamiento). */
+object HardwareDispositivo {
+
+    fun inspeccionar(context: Context): DiagnosticoHardware {
+        val appContext = context.applicationContext
+        val am = appContext.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
+        val memInfo = ActivityManager.MemoryInfo()
+        am?.getMemoryInfo(memInfo)
+
+        val ramTotalMb = if (memInfo.totalMem > 0L) memInfo.totalMem / (1024L * 1024L) else 4_096L
+        val ramDisponibleMb = if (memInfo.availMem > 0L) memInfo.availMem / (1024L * 1024L) else 1_500L
+        val nucleosCpu = Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
+        val almacenamientoLibreMb = runCatching {
+            StatFs(appContext.filesDir.absolutePath).availableBytes / (1024L * 1024L)
+        }.getOrDefault(8_192L)
+
+        return evaluar(
+            ramTotalMb = ramTotalMb,
+            ramDisponibleMb = ramDisponibleMb,
+            nucleosCpu = nucleosCpu,
+            almacenamientoLibreMb = almacenamientoLibreMb
+        )
+    }
+
+    fun evaluar(
+        ramTotalMb: Long,
+        ramDisponibleMb: Long,
+        nucleosCpu: Int,
+        almacenamientoLibreMb: Long
+    ): DiagnosticoHardware {
+        val base = DiagnosticoHardware(
+            ramTotalMb = ramTotalMb,
+            ramDisponibleMb = ramDisponibleMb,
+            nucleosCpu = nucleosCpu,
+            almacenamientoLibreMb = almacenamientoLibreMb,
+            perfilRecomendado = PerfilModeloLocal.BASICO
+        )
+        val recomendado = when {
+            base.esCompatible(PerfilModeloLocal.AVANZADO) && nucleosCpu >= 6 -> PerfilModeloLocal.AVANZADO
+            base.esCompatible(PerfilModeloLocal.INTERMEDIO) && nucleosCpu >= 6 -> PerfilModeloLocal.INTERMEDIO
+            else -> PerfilModeloLocal.BASICO
+        }
+        return base.copy(perfilRecomendado = recomendado)
     }
 }
 
@@ -241,6 +361,19 @@ class InteligenciaConfig(context: Context) {
             prefs.edit().putString(KEY_PROVEEDOR, valor.id).apply()
         }
 
+    var perfilModeloLocal: PerfilModeloLocal
+        get() {
+            val guardado = prefs.getString(KEY_PERFIL_MODELO_LOCAL, null)
+            return if (guardado != null) {
+                PerfilModeloLocal.desdeId(guardado)
+            } else {
+                HardwareDispositivo.inspeccionar(appContext).perfilRecomendado
+            }
+        }
+        set(valor) {
+            prefs.edit().putString(KEY_PERFIL_MODELO_LOCAL, valor.id).apply()
+        }
+
     var modoEjecucionLocal: ModoEjecucionLocal
         get() = ModoEjecucionLocal.desdeId(prefs.getString(KEY_MODO_LOCAL, null))
         set(valor) {
@@ -282,6 +415,13 @@ class InteligenciaConfig(context: Context) {
         set(valor) {
             prefs.edit().putString(KEY_NOMBRE_MODELO_LOCAL, valor.trim()).apply()
         }
+
+    fun urlModeloPerfil(perfil: PerfilModeloLocal): String =
+        prefs.getString("url_modelo_perfil_${perfil.id}", null).orEmpty()
+
+    fun guardarUrlModeloPerfil(perfil: PerfilModeloLocal, url: String) {
+        prefs.edit().putString("url_modelo_perfil_${perfil.id}", url.trim()).apply()
+    }
 
     fun endpointProveedor(proveedor: ProveedorIA): String =
         prefs.getString("endpoint_${proveedor.id}", null)
@@ -355,6 +495,7 @@ class InteligenciaConfig(context: Context) {
     companion object {
         private const val PREFS_NAME = "iris_inteligencia_prefs"
         private const val KEY_PROVEEDOR = "proveedor_activo"
+        private const val KEY_PERFIL_MODELO_LOCAL = "perfil_modelo_local"
         private const val KEY_MODO_LOCAL = "modo_ejecucion_local"
         private const val KEY_DESTINO_NOTAS = "destino_notas_predeterminado"
         private const val KEY_CONECTOR_KEEP = "conector_keep"
