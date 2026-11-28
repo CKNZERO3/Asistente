@@ -265,6 +265,30 @@ class ModeloLocal(context: Context) {
                 resultado
             }
         }
+        /** True si el motor LiteRT-LM ya está cargado en RAM (evita arranque en frío). */
+    fun estaCargadoEnMemoria(): Boolean = motorCargado != null
+
+    /** Inferencia ultracorta de 2 tokens para clasificación binaria (0 o 1). */
+    suspend fun inferirDosTokens(prompt: String): String =
+        withContext(Dispatchers.Default) {
+            val motor = motorCargado ?: return@withContext ""
+            mutex.withLock {
+                val resultado = runCatching {
+                    val configuracion = ConversationConfig(
+                        systemInstruction = Contents.of("Clasificador binario."),
+                        samplerConfig = SamplerConfig(topK = 1, topP = 1.0, temperature = 0.0)
+                    )
+                    motor.createConversation(configuracion).use { conversacion ->
+                        conversacion
+                            .sendMessage(Message.user(prompt), maxOutputToken = 2)
+                            .toString()
+                            .trim()
+                    }
+                }.getOrDefault("")
+                programarCierre()
+                resultado
+            }
+        }
 
     private fun crearMotor(): Engine {
         val configuracion = EngineConfig(
