@@ -311,12 +311,14 @@ class MainActivity : ComponentActivity() {
         pendingAttachments.clear()
         chat.clear()
         chat.updateThinking(false)
+        procesador.limpiarHistorialChat()
         activeConversationId = "conv_${System.currentTimeMillis()}"
     }
 
     private fun seleccionarConversacion(conv: SavedConversation) {
         detenerVozSilenciosamente()
         pendingAttachments.clear()
+        procesador.limpiarHistorialChat()
         activeConversationId = conv.id
         chat.clear()
         conv.messages.forEach { saved ->
@@ -773,7 +775,7 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch { googleSignIn.signOut() }
     }
 
-        private fun manejarAccion(destination: String) {
+    private fun manejarAccion(destination: String) {
         when (destination) {
             "new_chat", "clear_messages" -> iniciarNuevaConversacion()
             "permissions" -> abrirAjustesDeLaApp()
@@ -791,7 +793,6 @@ class MainActivity : ComponentActivity() {
             "import" -> pickMemoryFile.launch(arrayOf("text/*", "application/json"))
         }
     }
-        
 
     private fun abrirAjustesDeLaApp() {
         val intent = Intent(
