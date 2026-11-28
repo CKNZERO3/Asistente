@@ -43,8 +43,10 @@ class GeminiClient(
         private const val BASE = "https://asistente.cristian-nava-ruido.workers.dev/v1beta/models"
         private const val TAG = "IrisGeminiClient"
         private val cuota = CuotaModelos()
-        private const val TIMEOUT_CONEXION_MS = 15_000
-        private const val TIMEOUT_LECTURA_MS = 60_000
+        private const val TIMEOUT_CONEXION_MS = 8_000
+        private const val TIMEOUT_LECTURA_FLASH_MS = 12_000
+        private const val TIMEOUT_LECTURA_COMPLEJA_MS = 30_000
+        private const val MAX_MENSAJES_HISTORIAL = 6
 
         private const val INSTRUCCION =
             "Eres Iris, el asistente personal del usuario en su teléfono. " +
@@ -54,15 +56,41 @@ class GeminiClient(
                 "de la solicitud; no limites una tarea compleja a tres frases."
     }
 
+    private val historialLock = Any()
+    private val historial = ArrayDeque<Pair<String, String>>(MAX_MENSAJES_HISTORIAL)
+
+    fun limpiarHistorial() {
+        synchronized(historialLock) {
+            historial.clear()
+        }
+    }
+
+    private fun snapshotHistorial(): List<Pair<String, String>> =
+        synchronized(historialLock) { historial.toList() }
+
+    private fun registrarTurno(preguntaUsuario: String, respuestaModelo: String) {
+        synchronized(historialLock) {
+            historial.addLast("user" to preguntaUsuario)
+            historial.addLast("model" to respuestaModelo)
+            while (historial.size > MAX_MENSAJES_HISTORIAL) {
+                historial.removeFirst()
+            }
+            while (historial.isNotEmpty() && historial.first().first != "user") {
+                historial.removeFirst()
+            }
+        }
+    }
+
     suspend fun preguntar(
         pregunta: String,
         modeloSolicitado: String = modelo,
         instruccionesExtra: String = "",
-        permitirBusquedaWeb: Boolean = true
+        permitirBusquedaWeb: Boolean = true,
+        esCompleja: Boolean = false
     ): Result<String> = withContext(Dispatchers.IO) {
         val modeloInicial = modeloSolicitado
             .takeIf(IrisModelSelector::esModeloPermitido)
-            ?: MODELO_POR_DEFECTO
+            ?: if (esCompleja) IrisModelSelector.MODELO_AVANZADO else MODELO_POR_DEFECTO
         val todos = candidatosFallback(modeloInicial)
         val candidatos = todos.filter(cuota::disponible)
         if (candidatos.isEmpty()) {
@@ -72,17 +100,21 @@ class GeminiClient(
             )
         }
         var ultimoError: Throwable? = null
+        val contextoPrevio = snapshotHistorial()
 
         for (indice in candidatos.indices) {
             val modeloActual = candidatos[indice]
             try {
                 val texto = llamarConCompatibilidad(
                     pregunta = pregunta,
+                    historialPrevio = contextoPrevio,
                     modelo = modeloActual,
                     instruccionesExtra = instruccionesExtra,
-                    permitirBusquedaWeb = permitirBusquedaWeb
+                    permitirBusquedaWeb = permitirBusquedaWeb,
+                    esCompleja = esCompleja
                 )
                 cuota.registrarExito(modeloActual)
+                registrarTurno(pregunta, texto)
                 return@withContext Result.success(texto)
             } catch (e: CancellationException) {
                 throw e
@@ -150,28 +182,61 @@ class GeminiClient(
 
     private fun llamarConCompatibilidad(
         pregunta: String,
+        historialPrevio: List<Pair<String, String>>,
         modelo: String,
         instruccionesExtra: String,
-        permitirBusquedaWeb: Boolean
+        permitirBusquedaWeb: Boolean,
+        esCompleja: Boolean
     ): String {
-        if (!permitirBusquedaWeb) {
-            return llamar(pregunta, modelo, instruccionesExtra, conBusqueda = false)
-        }
         return try {
-            llamar(pregunta, modelo, instruccionesExtra, conBusqueda = true)
+            llamar(
+                pregunta = pregunta,
+                historialPrevio = historialPrevio,
+                modelo = modelo,
+                instruccionesExtra = instruccionesExtra,
+                conBusqueda = permitirBusquedaWeb,
+                desactivarThinking = !esCompleja,
+                readTimeoutMs = if (esCompleja) TIMEOUT_LECTURA_COMPLEJA_MS else TIMEOUT_LECTURA_FLASH_MS
+            )
         } catch (e: HttpException) {
             if (e.codigo != 400) throw e
-            Log.i(TAG, "Se reintentará $modelo sin Google Search.")
-            llamar(pregunta, modelo, instruccionesExtra, conBusqueda = false)
+            Log.i(TAG, "Reintentando $modelo en modo compatible sin herramientas/thinkingConfig.")
+            llamar(
+                pregunta = pregunta,
+                historialPrevio = historialPrevio,
+                modelo = modelo,
+                instruccionesExtra = instruccionesExtra,
+                conBusqueda = false,
+                desactivarThinking = false,
+                readTimeoutMs = if (esCompleja) TIMEOUT_LECTURA_COMPLEJA_MS else TIMEOUT_LECTURA_FLASH_MS
+            )
         }
     }
 
     private fun llamar(
         pregunta: String,
+        historialPrevio: List<Pair<String, String>>,
         modelo: String,
         instruccionesExtra: String,
-        conBusqueda: Boolean
+        conBusqueda: Boolean,
+        desactivarThinking: Boolean,
+        readTimeoutMs: Int
     ): String {
+        val contentsArray = JSONArray().apply {
+            for ((rol, textoTurno) in historialPrevio) {
+                put(
+                    JSONObject()
+                        .put("role", rol)
+                        .put("parts", JSONArray().put(JSONObject().put("text", textoTurno)))
+                )
+            }
+            put(
+                JSONObject()
+                    .put("role", "user")
+                    .put("parts", JSONArray().put(JSONObject().put("text", pregunta)))
+            )
+        }
+
         val cuerpo = JSONObject().apply {
             put(
                 "systemInstruction",
@@ -180,13 +245,16 @@ class GeminiClient(
                     JSONArray().put(JSONObject().put("text", instruccionConFecha(instruccionesExtra)))
                 )
             )
-            put(
-                "contents",
-                JSONArray().put(
-                    JSONObject().put("role", "user")
-                        .put("parts", JSONArray().put(JSONObject().put("text", pregunta)))
+            put("contents", contentsArray)
+            if (desactivarThinking) {
+                put(
+                    "generationConfig",
+                    JSONObject().put(
+                        "thinkingConfig",
+                        JSONObject().put("thinkingBudget", 0)
+                    )
                 )
-            )
+            }
             if (conBusqueda) {
                 put("tools", JSONArray().put(JSONObject().put("google_search", JSONObject())))
             }
@@ -196,7 +264,7 @@ class GeminiClient(
         val conexion = (URL(url).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             connectTimeout = TIMEOUT_CONEXION_MS
-            readTimeout = TIMEOUT_LECTURA_MS
+            readTimeout = readTimeoutMs
             doOutput = true
             useCaches = false
             setRequestProperty("Content-Type", "application/json; charset=utf-8")
